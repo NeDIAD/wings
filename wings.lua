@@ -1225,19 +1225,6 @@ local function dox_proceed(ent)
     dox_db[tostring(steam)] = db
 end
 
-wings.hooks.player_score.dox = function(e)
-    local ent = client.userid_to_entindex(e.userid)
-    dox_proceed(ent)
-
-    local name, steam = entity.get_player_name(ent), entity.get_steam64(ent)
-    local db = dox_db[tostring(steam)]
-
-    for i, v in pairs(e) do
-        print(i .. ' = ' .. v)
-    end
-
-end
-
 wings.hooks.player_connect_full.dox = function(e)
     local ent = client.userid_to_entindex(e.userid)
     if ent == entity.get_local_player() then for i = 1, globals.maxplayers() do dox_proceed(i) end return false end 
