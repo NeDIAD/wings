@@ -410,7 +410,7 @@ local png = {
 
 filesystem.create_directory('wings/assets', 'ROOT_PATH')
 
-local link = 'https://raw.githubusercontent.com/NeDIAD/wings_assets/main/'
+local link = 'https://raw.githubusercontent.com/NeDIAD/wings/main/assets'
 
 for i, v in pairs(png) do
 
@@ -433,12 +433,12 @@ for i, v in pairs(png) do
 end
 
 if not readfile('csgo/sound/wings/hitsound.mp3') then
-    http.get('https://raw.githubusercontent.com/NeDIAD/wings_assets/main/hitsound.mp3', function(success, raw)
+    http.get(link .. '/hitsound.mp3', function(success, raw)
         if success then
             writefile('csgo/sound/wings/hitsound.mp3', raw.body)
-            print('Asset-manager: Downloaded hitsound.mp3 (https://raw.githubusercontent.com/NeDIAD/wings_assets/main/hitsound.mp3)')
+            print('Asset-manager: Downloaded hitsound.mp3 (' .. link .. '/hitsound.mp3)')
         else   
-            print('Asset-manager: Failed to download hitsound.mp3 (https://raw.githubusercontent.com/NeDIAD/wings_assets/main/hitsound.mp3)')
+            print('Asset-manager: Failed to download hitsound.mp3 (' .. link .. '/hitsound.mp3)')
         end
     end)
 end
