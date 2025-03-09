@@ -15,24 +15,54 @@ for i, v in pairs(hooks) do wings.hooks[v] = {} end
 local http = require('gamesense/http')
 local vector = require('vector')
 local images = require('gamesense/images')
+local clipboard = require('gamesense/clipboard')
+local base64 = require('gamesense/base64')
 
 local persona = panorama.open().MyPersonaAPI
 
 --#endregion
 
 --#region DB
-local chat_db = database.read('wings_chat') or {}
-local dox_db = database.read('wings_dox') or {}
-database.write('wings_chat', chat_db)
-database.write('wings_dox', dox_db)
+local db = database.read('wings') or {}
+local migrated = false
+
+db.chat = db.chat or {}
+db.dox = db.dox or {}
+db.configs = db.configs or {}
+
+local migrate = {
+    dox = 'wings_dox',
+    chat = 'wings_chat'
+}
+
+
+if not db.migrated then
+    db.migrated = true
+    migrated = true
+    
+    print('Migrating db..')
+    
+    for tbl, name in pairs(migrate) do
+        local base = database.read(name)
+        print('Migrate ' .. name .. ' => main')
+
+        if not base then print('Migrate fail!') goto continue end
+
+        db[tbl] = base
+        database.write(name, nil)
+
+        ::continue::
+    end
+    
+    print('DB Migrated.')
+end
 
 local function save()
-    database.write('wings_chat', chat_db)
-    database.write('wings_dox', dox_db)
+    database.write('wings', db)
     database.flush()
 end
 
-wings.hooks.shutdown.chat_db = save
+wings.hooks.shutdown.db_save = save
 --#endregion
 
 --#region INIT
@@ -335,7 +365,7 @@ wings.color = {
 wings.settings = {
     prefix = '   ' .. wings.color.base .. 'wings' .. wings.color.white .. ' » ',
     chat_prefix = '{purple} wings {white} » {grey}',
-    dev = false,
+    dev = true,
     build = 'Development build v0.1'
 }
 
@@ -398,6 +428,10 @@ assert = function(...) if wings.settings.dev then print(...) end end
 assert('Debug-mode.')
 
 direct_print(color.rgb(255, 255, 255), '\n')
+
+if migrated then
+    print('Database was succesfully migrated to new version!')
+end
 
 --#endregion
 
@@ -937,7 +971,7 @@ local tabs do
         
         table.insert(tabslist, name)
         
-        combo = ui.new_combobox('Lua', 'B', wings.color.base .. 'FF Wings' .. wings.color.gray ..'FF ~ Stable', unpack(tabslist))
+        combo = ui.new_combobox('Lua', 'B', wings.color.base .. 'FF Wings' .. wings.color.gray ..'FF ~ ' .. string.split(wings.settings.build, ' ')[1], unpack(tabslist))
         if prev_value then ui.set(combo, prev_value) end
         
         tabs.tabs[name] = {}
@@ -1216,14 +1250,14 @@ local function dox_proceed(ent)
     if not name or not steam then return false end
     local time = client.unix_time()
 
-    local db = dox_db[tostring(steam)] or {}
+    local dbase = db.dox[tostring(steam)] or {}
     
-    db.history_names = db.history_names or {}
-    db.first_time = db.first_time or time
+    dbase.history_names = dbase.history_names or {}
+    dbase.first_time = dbase.first_time or time
 
-    db.history_names[name] = db.history_names[name] or time
+    dbase.history_names[name] = dbase.history_names[name] or time
 
-    dox_db[tostring(steam)] = db
+    db.dox[tostring(steam)] = dbase
 end
 
 wings.hooks.player_connect_full.dox = function(e)
@@ -1643,6 +1677,17 @@ local x, y = scrW - w - 90, scrH / 2 - h / 2
 
 local spec_data, loaded_avatars = {}, {}
 
+wings.hooks.player_connect_full.spectators = function(e)
+    local ent = client.userid_to_entindex(e.userid)
+
+    if ent == entity.get_local_player() then loaded_avatars = {} end
+    loaded_avatars[ent] = nil
+end
+
+wings.hooks.client_disconnect.spectators = function()
+    loaded_avatars = {}
+end
+
 local spec_widget = widgets.new('spectators_list', function(self)
     local e = self.animate
 
@@ -2010,7 +2055,7 @@ aa:add(ui.new_label('Lua', 'A', format('Wings', ' Anti-Aim')))
 aa:add({ui.new_label('Lua', 'B', ' Experimental feature.'), ui.new_label('Lua', 'B', '\n')})
 
 local aa_enabled = ui.new_checkbox('Lua', 'B', format(' Anti-Aim', 'Enabled'))
-local page = ui.new_combobox('Lua', 'B', format(' Anti-Aim', 'Page'), 'Other', 'Builder')
+local page = ui.new_combobox('Lua', 'B', format(' Anti-Aim', 'Page'), 'Other', 'Builder', 'Config')
 aa:add(page, function() return ui.get(aa_enabled) end)
 aa:add(aa_enabled)
 
@@ -2020,6 +2065,8 @@ local manuals = {
     {'Manual Forward', 180},
     {'Manual Reset', nil}
 }
+
+local config = {} 
 
 --#region BUILDER
 --#region STATES
@@ -2414,6 +2461,8 @@ local ui_map = {
 for i, v in pairs(states) do
     assert('+ ' .. wings.color.base .. v.display)
 
+    config[v.id] = config[v.id] or {}
+
     v.ui = v.ui or {}
 
     aa:add(ui.new_label('Lua', 'A', '\n'), function() return ui.get(page) == 'Builder' and ui.get(state) == v.display and ui.get(aa_enabled) end) 
@@ -2424,12 +2473,27 @@ for i, v in pairs(states) do
         override = ui.new_checkbox('Lua', 'A', format(' Anti-Aim', v.display, 'Override'))
         aa:add(override, function() return ui.get(page) == 'Builder' and ui.get(state) == v.display and ui.get(aa_enabled) end)
         v.ui.override = {id = override, map = ui_map}
+
+        config[v.id].override = false
+
+        ui.set_callback(override, function()
+            config[v.id].override = ui.get(override)
+
+            --assert(v.id .. ' : override = ' .. tostring(ui.get(override)))
+        end)
     end
 
     for _, data in pairs(ui_map) do
         local result = ui['new_' .. data.type]('Lua', (data.tab or 'A'), string.format(data.display, v.display), unpack(data.unpack))
         aa:add(result, function() return ui.get(page) == 'Builder' and ui.get(state) == v.display and ui.get(aa_enabled) and ((data.depency and data.depency(v.ui, v)) or not data.depency) and (v.id == 'global' or ui.get(override)) end)
         v.ui[data.id] = {id = result, map = data}
+
+        config[v.id][data.id] = ui.get(result)
+        ui.set_callback(result, function()
+            config[v.id][data.id] = ui.get(result)
+            
+            --assert(v.id .. ' : ' .. data.id .. ' = ' .. tostring(ui.get(result)))
+        end)
     end
 end
 
@@ -2593,6 +2657,107 @@ wings.hooks.paint.freestand = function()
 end
 --#endregion
 
+--#region CONFIG
+local list = ui.new_listbox('Lua', 'A', format(' Anti-Aim', 'Configs'), 'No configs.')
+local raw_base = {}
+
+local function update()
+    local dbase = db.configs
+    raw_base = {}
+
+    for i, v in pairs(dbase) do
+        if type(i) ~= 'string' or type(v) ~= 'table' or #i < 2 then goto continue end
+        table.insert(raw_base, i)
+
+        ::continue::
+    end
+    if #raw_base < 1 then raw_base = {'No configs'} end
+
+    ui.update(list, raw_base)
+end
+
+update()
+
+local function get_select()
+    local now = ui.get(list)
+    if not now then return '?' end
+
+    return raw_base[now + 1] or '?'
+end
+
+local config_name = ui.new_textbox('Lua', 'A', format(' Anti-Aim', 'Config Name'))
+
+local function load_cfg(cfg)
+    if not cfg then --[[assert('Failed to find config!')]] return false end
+
+    for i, v in pairs(states) do
+        local state_cfg = cfg[v.id]
+
+        if not state_cfg then --[[assert('Failed to find state \"' .. v.id .. '\" in config.')]] goto continue end
+
+        for _, e in pairs(v.ui) do
+            local ui_cfg = state_cfg[_]
+            
+            if not ui_cfg then --[[assert('Failed to find element \"' .. _.. '\" in \"' .. v.id .. '\"')]] goto continue end
+            
+            ui.set(e.id, ui_cfg)
+            ::continue::
+        end
+
+        ::continue::
+    end
+end
+
+local load = ui.new_button('Lua', 'A', ' ' .. wings.color.base .. 'FFLoad', function()
+    local selected = get_select()
+    local cfg = db.configs[selected]
+    load_cfg(cfg)
+end)
+
+local save = ui.new_button('Lua', 'A', ' ' .. wings.color.base .. 'FFSave', function()
+    local selected = ui.get(config_name)
+    if #selected < 2 then ui.set(config_name, 'Provide more than 2 symbols!') return false end
+
+    db.configs[selected] = config
+
+    save()
+
+    --for i, v in pairs(db.configs[selected]) do
+    --    assert('State: ' .. i)
+    --
+    --    for _, e in pairs(v) do
+    --        assert('State: ' .. i .. ', element:' .. _ .. ' value: ' .. tostring(e))
+    --    end
+    --end
+
+    update()
+end)
+
+local remove = ui.new_button('Lua', 'A', ' ' .. wings.color.base .. 'FFDelete', function()
+    local selected = get_select()
+    db.configs[selected] = nil
+
+    update()
+end)
+
+local import = ui.new_button('Lua', 'B', ' ' .. wings.color.base .. 'FFImport from clipboard', function()
+    load_cfg(json.parse(base64.decode(clipboard.get() or '')))
+end)
+
+local export = ui.new_button('Lua', 'B', ' ' .. wings.color.base .. 'FFExport from clipboard', function()
+    clipboard.set(base64.encode(json.stringify(config)))
+end)
+
+ui.set_callback(list, function()
+    local selected = get_select()
+
+    ui.set(config_name, selected)
+end)
+
+aa:add({list, config_name, load, save, remove, import, export}, function() return ui.get(page) == 'Config' and ui.get(aa_enabled) end)
+
+--#endregion
+
 --#endregion
 
 --#endregion
@@ -2676,7 +2841,7 @@ local handle_one = function(ent)
     local name, steam = entity.get_player_name(ent), entity.get_steam64(ent)
     if not name or not steam then return false end
 
-    if chat_db[tostring(steam)] then
+    if db.chat[tostring(steam)] then
         mute.set(ent, true)
 
         add_render('Player automatically muted. (' .. name .. ')')
@@ -2715,13 +2880,13 @@ local commands = {
                 if not target then add_render('Player not found!', {255, 0, 0}); cprint('{white}' .. find .. '{grey} not found!') return false end
                 local name, steam = entity.get_player_name(target), entity.get_steam64(target)
         
-                if chat_db[tostring(steam)] then add_render('Player already muted.', {255, 0, 0}); cprint('{white}' .. name .. '{grey} already premuted!') return false end
+                if db.chat[tostring(steam)] then add_render('Player already muted.', {255, 0, 0}); cprint('{white}' .. name .. '{grey} already premuted!') return false end
         
                 mute.set(target, true)
                 add_render('Player added to premute. (' .. name .. ')')
                 cprint('{white}' .. name .. '{grey} added to premute!')
         
-                chat_db[tostring(steam)] = name
+                db.chat[tostring(steam)] = name
             end,
             remove = function()
                 table.remove(args, 1)
@@ -2729,7 +2894,7 @@ local commands = {
         
                 local target, direct
 
-                if chat_db[find] then
+                if db.chat[find] then
                     target = find
                     direct = true
                 else
@@ -2742,22 +2907,22 @@ local commands = {
                 if not direct then
                     name, steam = entity.get_player_name(target), entity.get_steam64(target)
                 else
-                    name, steam = chat_db[find], find
+                    name, steam = db.chat[find], find
                 end
         
-                if not chat_db[tostring(steam)] then add_render('Player aint muted.', {255, 0, 0}); cprint('{white}' .. name .. '{grey} aint premuted!') return false end
+                if not db.chat[tostring(steam)] then add_render('Player aint muted.', {255, 0, 0}); cprint('{white}' .. name .. '{grey} aint premuted!') return false end
         
                 if not direct then mute.set(target, false) end
                 add_render('Player removed from premute. (' .. name .. ')')
                 cprint('{white}' .. name .. '{grey} removed from premute!')
         
-                chat_db[tostring(steam)] = nil
+                db.chat[tostring(steam)] = nil
             end,
             list = function()
-                local count = 0; for i, v in pairs(chat_db) do count = count + 1 end
+                local count = 0; for i, v in pairs(db.chat) do count = count + 1 end
                 cprint('List of premuted users (' .. count .. '): ')
 
-                for i, v in pairs(chat_db) do
+                for i, v in pairs(db.chat) do
                     cprint('{grey}' .. tostring(v) .. '{white} (' .. tostring(i) .. ')')
                 end
             end,
@@ -2782,15 +2947,16 @@ local commands = {
         
         local name, steam
         local target = resolve_player(find)
-        if not target and dox_db[find] then target = dox_db[find]; name, steam = dox_db[find][#dox_db[find]], find end
+        if not target and db.dox[find] then target = db.dox[find]; name, steam = db.dox[find][#db.dox[find]], find end
 
         if not target then add_render('Player not found!', {255, 0, 0}); cprint('{white}' .. find .. '{grey} not found!') return false end
         local name, steam = name or entity.get_player_name(target), steam or entity.get_steam64(target)
         cprint('{white}' .. name .. ' {grey}' .. steam)
-        local db = dox_db[tostring(steam)]
-        if chat_db[tostring(steam)] then cprint('{white}Premuted with nickname: {grey}' .. chat_db[tostring(steam)]) end
+
+        if db.chat[tostring(steam)] then cprint('{white}Premuted with nickname: {grey}' .. db.chat[tostring(steam)]) end
+        local dbase = db.dox[tostring(steam)]
         
-        if not db then return false end
+        if not dbase then return false end
 
         local map = {
             {'first_time', function(v)
@@ -2806,13 +2972,14 @@ local commands = {
             end},
         }
 
-        for i, v in pairs(map) do if db[v[1]] then pcall(v[2], db[v[1]]) end end
+        for i, v in pairs(map) do if dbase[v[1]] then pcall(v[2], dbase[v[1]]) end end
     end,
     clear_keys = function(args)
         if args[1] ~= 'confirm' then cprint('{red}This command will delete all keys.') cprint('{grey}If u want to continue use: {white}clear_keys confirm') return false end
 
-        dox_db = {}
-        chat_db = {}
+        db.dox = {}
+        db.chat = {}
+
         cprint('{grey}Succesfully deleted {white}keys{grey}.')
     end
 }
