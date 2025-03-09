@@ -8,16 +8,20 @@
 
 --#region PRE-INIT
 
-local wings = {hooks = {}}
-wings.start = client.timestamp()
+local wings = {hooks = {}, start = client.timestamp()}
+
 local hooks = {'paint', 'paint_ui', 'player_score', 'round_end', 'client_disconnect', 'player_say', 'shutdown', 'string_cmd', 'player_connect_full', 'override_view', 'player_changename', 'player_spawn', 'net_update_start', 'aim_hit', 'aim_miss', 'aim_fire', 'setup_command', 'run_command', 'predict_command'}
 for i, v in pairs(hooks) do wings.hooks[v] = {} end
+
 local http = require('gamesense/http')
 local vector = require('vector')
 local images = require('gamesense/images')
 local clipboard = require('gamesense/clipboard')
 local base64 = require('gamesense/base64')
+local chat = require('gamesense/chat')
 
+local gsa = panorama.open().GameStateAPI
+local mai = panorama.open().MatchInfoAPI
 local persona = panorama.open().MyPersonaAPI
 
 --#endregion
@@ -67,9 +71,6 @@ wings.hooks.shutdown.db_save = save
 
 --#region INIT
 client.exec('clear')
-local gsa = panorama.open().GameStateAPI
-local mai = panorama.open().MatchInfoAPI
-local chat = require('gamesense/chat')
 
 wings.hooks.paint.smile = function() renderer.indicator(164, 158, 229, 255, '>_<') end
 
@@ -429,9 +430,7 @@ assert('Debug-mode.')
 
 direct_print(color.rgb(255, 255, 255), '\n')
 
-if migrated then
-    print('Database was succesfully migrated to new version!')
-end
+if migrated then print('Database was succesfully migrated to new version!') end
 
 --#endregion
 
@@ -2631,7 +2630,7 @@ wings.hooks.paint.manuals = function()
         if ui.get(v) and not prev_state[v] then
             local data = manuals[i][2]
 
-            if antiaim.manual == data then
+            if antiaim.manual == data or data == 0 then
                 antiaim.manual = nil
             else
                 antiaim.manual = data
