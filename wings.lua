@@ -15,24 +15,54 @@ for i, v in pairs(hooks) do wings.hooks[v] = {} end
 local http = require('gamesense/http')
 local vector = require('vector')
 local images = require('gamesense/images')
+local clipboard = require('gamesense/clipboard')
+local base64 = require('gamesense/base64')
 
 local persona = panorama.open().MyPersonaAPI
 
 --#endregion
 
 --#region DB
-local chat_db = database.read('wings_chat') or {}
-local dox_db = database.read('wings_dox') or {}
-database.write('wings_chat', chat_db)
-database.write('wings_dox', dox_db)
+local db = database.read('wings') or {}
+local migrated = false
+
+db.chat = db.chat or {}
+db.dox = db.dox or {}
+db.configs = db.configs or {}
+
+local migrate = {
+    dox = 'wings_dox',
+    chat = 'wings_chat'
+}
+
+
+if not db.migrated then
+    db.migrated = true
+    migrated = true
+    
+    print('Migrating db..')
+    
+    for tbl, name in pairs(migrate) do
+        local base = database.read(name)
+        print('Migrate ' .. name .. ' => main')
+
+        if not base then print('Migrate fail!') goto continue end
+
+        db[tbl] = base
+        database.write(name, nil)
+
+        ::continue::
+    end
+    
+    print('DB Migrated.')
+end
 
 local function save()
-    database.write('wings_chat', chat_db)
-    database.write('wings_dox', dox_db)
+    database.write('wings', db)
     database.flush()
 end
 
-wings.hooks.shutdown.chat_db = save
+wings.hooks.shutdown.db_save = save
 --#endregion
 
 --#region INIT
@@ -399,6 +429,10 @@ assert('Debug-mode.')
 
 direct_print(color.rgb(255, 255, 255), '\n')
 
+if migrated then
+    print('Database was succesfully migrated to new version!')
+end
+
 --#endregion
 
 --#region ASSETS
@@ -639,13 +673,13 @@ local render do
     render = {}
     
     function render.rectangle(x, y, w, h, r, g, b, a, radius, ignore_corner)
-        x = type(x) == 'number' and x or 0; y = type(y) == 'number' and y or 0; w = type(w) == 'number' and w or 0; h = type(h) == 'number' and h or 0; r = r or 255 g = g or 255 b = b or 255 a = a or 255 radius = radius or 8
+        x = type(x) == 'number' and x or 0; y = type(y) == 'number' and y or 0; w = type(w) == 'number' and w or 0; h = type(h) == 'number' and h or 0; r = r or 255 g = g or 255 b = b or 255 a = a or 0 radius = radius or 8
         x = math.floor(x); y = math.floor(y); w = math.floor(w); h = math.floor(h)
 
         ignore_corner = type(ignore_corner) == 'table' and ignore_corner or {}
         local off_corner = {lb = true, lt = true, rb = true, rt = true}
 
-        if x < 10 or y < 10 or w < 10 or h < 10 then ignore_corner = off_corner end
+        if --[[x < 10 or y < 10 or]] w < 10 or h < 10 then ignore_corner = off_corner end
 
         renderer.rectangle(x + radius, y, w - 2 * radius, h, r, g, b, a)
         renderer.rectangle(x, y + radius, radius, h - 2 * radius, r, g, b, a)
@@ -677,7 +711,6 @@ local render do
     end
 
     function render.glow(x, y, w, h, r, g, b, a, radius, ignore_corner, thickness, smooth)
-        
         smooth = type(smooth) == 'table' and smooth or {}
         thickness = type(thickness) == 'number' and thickness or 10
 
@@ -694,7 +727,6 @@ local render do
 
             if alpha == 5 then break end
         end
-
     end
 
     print(wings.color.green .. '» ' .. wings.color.base .. 'Render Library', wasted())
@@ -722,9 +754,6 @@ local mouse do
         local newX = mX - offsetX
         local newY = mY - offsetY
 
-        --assert('x1, x2, y1, y2, resX, resY: '..' '.. x1..' '.. x2..' '.. y1..' '.. y2..' '.. newX..' '.. newY)
-        --assert('mX, mY, scrW, scrH: '.. mX ..' '.. mY..' '.. scrW..' '.. scrH)
-
         if newX < 0 then newX = 0 end
         if newY < 0 then newY = 0 end
         if newX + w > scrW then newX = scrW - w end
@@ -740,6 +769,7 @@ local widgets do
     widgets = {}
     widgets.__index = widgets
     widgets.widgets = {}
+    widgets.dragging = nil
     local scrW, scrH = client.screen_size()
 
     local mouse_magnet = {
@@ -747,158 +777,167 @@ local widgets do
         x = {scrW / 2}
     }
 
-    
-    function widgets.new(id, push, x, y, w, h, draggable, tooltip, lock_size)
+    function widgets.new(id, push, x, y, w, h, draggable, tooltip)
         if not id or widgets.widgets[id] then return false end
-        push = type(push) == 'function' and push or function() end
-        x, y, w, h = type(x) == 'number' and x or 0, type(y) == 'number' and y or 0, type(w) == 'number' and w or 50, type(h) == 'number' and h or 50
-        
-        draggable = type(draggable) == 'table' and draggable or { x = true, y = true }
 
-        local self = setmetatable({}, widgets)
-        
-        self.current = {x = x, y = y, w = w, h = h}
-        self.animate = {x = x, y = y, w = w, h = h}
-        self.paint = true
+        push = push or function() return false end
+        x = x or 0; y = y or 0; w = w or 50; h = h or 50 -- important variables
 
-        local function line(x1, y1, x2, y2) renderer.line(x1, y1, x2, y2, 255, 255, 255, (self.line_alpha or 0)) end
+        draggable = draggable or {x = true, y = true}
 
-        local function slider(scale, init, align)
+        local self = {}
 
-            --[[
-                align:true = Y
-                align:false = X
-            ]]
+        local function slider(name, value, align)
+            local new = ui.new_slider('CONFIG', 'Presets', id .. ':' .. name, 0, (align and scrH or scrW), value)
+            ui.set_visible(new, wings.settings.dev)
 
-            local slide = ui.new_slider('CONFIG', 'Presets', id .. ':' .. scale, 0, (align and scrH or scrW), init)
-            if not wings.settings.dev then ui.set_visible(slide, false) end
+            ui.set_callback(new, function()
+                if not self or not self.current or not self.current[name] then return false end
 
-           return slide
+                self.current[name] = ui.get(new)
+            end)
+
+            return new
         end
 
-        self.ui = {
-            x = slider('x', x),
-            y = slider('y', y, true),
+        local function line(x1, y1, x2, y2) renderer.line(x1, y1, x2, y2, 255, 255, 255, (self.alpha.addition or 0)) end
+
+        self = {
+            current = {x = x, y = y, w = w, h = h},
+            animate = {x = x, y = y, w = w, h = h},
+            
+            alpha = {first = 0, second = 0, addition = 0},
+            
+            ui = {
+                x = slider('x', x, false),
+                --w = slider('w', w, false),
+
+                y = slider('y', y, true),
+                --h = slider('h', h, true),
+            },
+
+            paint = true, -- !!!
+            snap = false, -- !!!
         }
 
-        self.current = {x = x, y = y, w = w, h = h}
-        self.animate = {x = x, y = y, w = w, h = h}
+        local input = {} -- mouse
 
-        self.alpha = 0
-        self.drag_alpha = 0
+        local alpha_markup = {
+            first = 0, second = 0, addition = 0 -- targets       
+        }
 
-        if not lock_size then
-            self.ui.w = slider('w', w)
-            self.ui.h = slider('h', h, true)
-        end
+        function self.push()
+            if not self or not self.current or not self.animate or not self.alpha then return false end -- prevention
 
-        for scale, slider in pairs(self.ui) do
-            ui.set_callback(slider, function() self.current[scale] = ui.get(slider) end)
-        end
-
-        self.push = function()
-            if not self.current or not self.animate or not self.ui or not self.alpha or not self.drag_alpha then return false end
-
-            for scale, value in pairs(self.current) do
-                if self.animate[scale] == value then goto continue end
-                
-                self.animate[scale] = math.lerp(globals.frametime() * 10, self.animate[scale], value)
-                
-                ::continue::
+            -- current -> animate
+            for cord, value in pairs(self.current) do
+                self.animate[cord] = math.lerp(globals.frametime() * 10, self.animate[cord], value)
             end
-            
-            if not self.paint and self.alpha < 10 then return false end
+        
+            -- alpha
+            for state, value in pairs(self.alpha) do
+                local markup = alpha_markup[state] or alpha_markup.first
 
-            self.snap = ui.is_menu_open() and self.drag and not client.key_state(0x10) and tooltip
-            
-            if ui.is_menu_open() or not globals.mapname() then
-                
-                local check = self.drag or mouse.inbounds(self.current.x, self.current.y, self.current.w, self.current.h)
-                self.alpha = math.lerp(globals.frametime() * 10, self.alpha, (check and self.paint) and (self.drag and 150 or 120) or (self.paint and 100 or 0))
-                self.drag_alpha = math.lerp(globals.frametime() * 3, self.drag_alpha, widgets.drag_id == id and 200 or 0)
-                renderer.rectangle(0, 0, scrW, scrH, 0, 0, 0, self.drag_alpha)
+                self.alpha[state] = math.lerp(globals.frametime() * 15, value, markup)
+                self.alpha[state] = math.clamp(self.alpha[state], 0, 255) -- For some reason while loading in map or while low fps, alpha starts blinking.
+            end
 
-                if mouse.held() and check and (draggable.x or draggable.y) and (not widgets.drag_id or widgets.drag_id == id) then
-                    widgets.drag_id = id
-                    
-                    if not self.drag then 
-                        self.drag = {sX = self.current.x, sY = self.current.y} 
-                        self.drag.mX, self.drag.mY = ui.mouse_position()
-                    end
-                    local x, y = mouse.calc(self.drag.sX, self.drag.sY, self.drag.mX, self.drag.mY, self.current.w, self.current.h)
-                    
-                    local scales = {
-                        x = x,
-                        y = y
-                    }
-                    
-                    if self.snap then
-                        for scale, magnet in pairs(mouse_magnet) do
-                            if not draggable[scale] then goto continue end
-                            
-                            for i, value in ipairs(magnet) do
-                                if math.abs(scales[scale] - value) <= self.current[scale == 'x' and 'w' or 'h'] then
-                                    scales[scale] = value - self.current[scale == 'x' and 'w' or 'h'] / 2
-                                    if scales[scale] < 0 then scales[scale] = value end
-                                    if scales[scale] > (scale == 'x' and scrW - self.current.w or scrH - self.current.h) then scales[scale] = value - self.current[scale == 'x' and 'w' or 'h']  end
-                                end
-                            end
-                            
-                            ::continue::
-                        end
-                    end
-                    
-                    if draggable.x then ui.set(self.ui.x, scales.x) end
-                    if draggable.y then ui.set(self.ui.y, scales.y) end
-                else
-                    if widgets.drag_id == id then widgets.drag_id = nil end
-                    self.drag = nil
-                end
-                
+            if not self.paint or not ui.is_menu_open() then 
+                alpha_markup = {
+                    first = 0, second = 0, addition = 0    
+                }
             else
-                self.alpha = math.lerp(globals.frametime() * 10, self.alpha, 0)
+                alpha_markup = {
+                    first = (input.state and 120 or 70),
+                    second = (input.state and 210 or 170),
+                    addition = 0,
+                }
             end
+
+            -- disable draw
+            if not self.paint and self.alpha.first < 5 then return false end -- :(
+
+            self.snap = tooltip and not client.key_state(0x10)
+            alpha_markup.addition = (input.state and self.snap) and 150 or 0
+
+            local status, err = pcall(push, self) -- handling push function
+            if not status then assert('Error: ' .. err) end
+
+            -- rendering widget base
+            local base, raw = self.animate, self.current
             
-            if (self.alpha or 0) > 5 then
-                local c = self.animate
+            --[[
+                Snap to lines works weird with preventing floating point :)
+
+            for cord, value in pairs(base) do base[cord] = math.floor(value) end -- preventing floating point
+            for cord, value in pairs(raw) do raw[cord] = math.floor(value) end 
+            --]]
+
+            render.rectangle(0, 0, scrW, scrH, 0, 0, 0, self.alpha.addition, 0)
+            render.rectangle(base.x, base.y, base.w, base.h, 165, 165, 165, self.alpha.first, 8)
+
+            local padding = -2
+            render.rectangle(base.x - padding / 2, base.y - padding / 2, base.w + padding, base.h + padding, 25, 25, 25, self.alpha.second, 8)
+            
+            -- mouse
+            if mouse.held() and (mouse.inbounds(raw.x, raw.y, raw.w, raw.h) or input.state) and (not widgets.dragging or widgets.dragging == id) then
+                input.state = true
+
+                widgets.dragging = id
+
+                if not input.current then 
+                    input.current = {}
                 
-                render.rectangle(c.x, c.y, c.w, c.h, 255, 255, 255, math.max(0, self.alpha - 50), 4)
-                
-                local padd = 1
-                render.rectangle(c.x + padd, c.y + padd, c.w - padd * 2, c.h - padd * 2, 0, 0, 0, self.alpha, 4)
+                    input.current.widget = {x = raw.x, y = raw.y}
 
-                self.line_alpha = math.lerp(globals.frametime() * 10, self.line_alpha, (self.drag and self.snap) and 200 or 0)
+                    local mX, mY = ui.mouse_position()
+                    input.current.mouse = {x = mX, y = mY}
+                end
+                local x, y = mouse.calc(input.current.widget.x, input.current.widget.y, input.current.mouse.x, input.current.mouse.y, raw.w, raw.h)
 
-                if (self.line_alpha or 0) > 5 and tooltip then
+                -- snap to lines
+                local scales = {
+                    x = x,
+                    y = y
+                }
 
-                    for scale, magnets in pairs(mouse_magnet) do
+                if self.snap then
+                    for scale, magnet in pairs(mouse_magnet) do
                         if not draggable[scale] then goto continue end
                         
-                        for i, value in ipairs(magnets) do
-                            local style = (scale == 'y' and {0, value, scrW, value} or {value, 0, value, scrH})
-                            
-                            line(unpack(style))
+                        for i, value in ipairs(magnet) do
+                            if math.abs(scales[scale] - value) <= self.current[scale == 'x' and 'w' or 'h'] then
+                                scales[scale] = value - self.current[scale == 'x' and 'w' or 'h'] / 2
+                                if scales[scale] < 0 then scales[scale] = value end
+                                if scales[scale] > (scale == 'x' and scrW - self.current.w or scrH - self.current.h) then scales[scale] = value - self.current[scale == 'x' and 'w' or 'h']  end
+                            end
                         end
                         
                         ::continue::
                     end
-                    
-                    if draggable.x or draggable.y then 
-                        local text = wings.color.base .. 'FFSHIFT' .. wings.color.gray .. 'FF - Disable snap to grid'
-                        local tW, tH = renderer.measure_text('b+', text)
-                        self.text_multi = math.lerp(globals.frametime() * 10, self.text_multi, (self.drag and self.snap) and tW + 35 or 0)
+                end
 
-                        renderer.text(scrW / 2, scrH - 100, 255, 255, 255, 255, 'cb+', math.max(1, self.text_multi), text) 
-                        renderer.text(self.animate.x + self.animate.w / 2, self.animate.y + self.animate.h / 2, 255, 255, 255, 255, 'cb+', math.max(1, self.text_multi), wings.color.gray .. 'FFX: ' .. wings.color.base .. 'FF' .. self.current.x .. wings.color.gray .. 'FF Y:' .. wings.color.base .. 'FF' .. self.current.y)
-                    end
+                if draggable.x then ui.set(self.ui.x, scales.x) end
+                if draggable.y then ui.set(self.ui.y, scales.y) end
+            elseif widgets.dragging == id then
+                widgets.dragging = nil
+                input = {}
+            end
+
+            if self.snap and self.alpha.addition > 5 then
+                for scale, magnet in pairs(mouse_magnet) do
+                    if not draggable[scale] then goto continue end
                     
+                    for i, value in pairs(magnet) do
+                        local style = (scale == 'y' and {0, value, scrW, value} or {value, 0, value, scrH})
+                        line(unpack(style))
+                    end
+               
+                    ::continue::
                 end
             end
-            
-            local status, err = pcall(push, self.animate, self)
-            if not status then assert(err) end
         end
-        
+
         widgets.widgets[id] = self
         
         return self
@@ -906,12 +945,8 @@ local widgets do
 
     wings.hooks.paint_ui.widgets_handler = function()
         for id, self in pairs(widgets.widgets) do
-            if type(self) ~= 'table' or type(self.push) ~= 'function' then assert('Type error! '.. id) goto continue end
-
-            local status, err = pcall(function() self.push() end)
-            if not status then assert('Error: '.. err) end
-
-            ::continue::
+            local status, err = pcall(self.push)
+            if not status then assert('Error: ' .. err) end
         end 
     end
 
@@ -936,7 +971,7 @@ local tabs do
         
         table.insert(tabslist, name)
         
-        combo = ui.new_combobox('Lua', 'B', wings.color.base .. 'FF Wings' .. wings.color.gray ..'FF ~ Stable', unpack(tabslist))
+        combo = ui.new_combobox('Lua', 'B', wings.color.base .. 'FF Wings' .. wings.color.gray ..'FF ~ ' .. string.split(wings.settings.build, ' ')[1], unpack(tabslist))
         if prev_value then ui.set(combo, prev_value) end
         
         tabs.tabs[name] = {}
@@ -1215,14 +1250,14 @@ local function dox_proceed(ent)
     if not name or not steam then return false end
     local time = client.unix_time()
 
-    local db = dox_db[tostring(steam)] or {}
+    local dbase = db.dox[tostring(steam)] or {}
     
-    db.history_names = db.history_names or {}
-    db.first_time = db.first_time or time
+    dbase.history_names = dbase.history_names or {}
+    dbase.first_time = dbase.first_time or time
 
-    db.history_names[name] = db.history_names[name] or time
+    dbase.history_names[name] = dbase.history_names[name] or time
 
-    dox_db[tostring(steam)] = db
+    db.dox[tostring(steam)] = dbase
 end
 
 wings.hooks.player_connect_full.dox = function(e)
@@ -1531,8 +1566,10 @@ local scrW, scrH = client.screen_size()
 local tW, tH = renderer.measure_text('b', '100')
 local indicator_t, indicator_a = 0, 0
 
-local indicator = widgets.new('mindmg_indicator', function(e, self)
-    local m, a = self.alpha * 2.5, 255
+local indicator = widgets.new('mindmg_indicator', function(self)
+    local e = self.animate
+
+    local m, a = self.alpha.first * 2.5, 255
     local target = dmg2
     if ui.get(dmg) and ui.get(dmg + 1) then target = dmg + 2 end
 
@@ -1640,8 +1677,20 @@ local x, y = scrW - w - 90, scrH / 2 - h / 2
 
 local spec_data, loaded_avatars = {}, {}
 
-local spec_widget = widgets.new('spectators_list', function(e, self)
-    
+wings.hooks.player_connect_full.spectators = function(e)
+    local ent = client.userid_to_entindex(e.userid)
+
+    if ent == entity.get_local_player() then loaded_avatars = {} end
+    loaded_avatars[ent] = nil
+end
+
+wings.hooks.client_disconnect.spectators = function()
+    loaded_avatars = {}
+end
+
+local spec_widget = widgets.new('spectators_list', function(self)
+    local e = self.animate
+
     local lp = entity.get_local_player()
 
     local spectators, target = {}, lp -- Solus V2
@@ -1706,14 +1755,13 @@ local spec_widget = widgets.new('spectators_list', function(e, self)
         data.lerps.width = math.lerp(globals.frametime() * 20, data.lerps.width, w)
 
         local x, y, w = math.floor(data.lerps.offset_x), math.floor(data.lerps.offset_y), math.floor(data.lerps.width)
-
-        render.rectangle(e.x + e.w - x, base_y - y, w, h, 100, 100, 100, data.lerps.alpha, 8)
         
+        render.rectangle(e.x + e.w - x, base_y - y, w, h, 100, 100, 100, data.lerps.alpha, 8)
+        renderer.text(e.x + e.w - x + w / 2 - tW / 2, base_y - y + h / 2 - tH / 2, 255, 255, 255, data.lerps.full_alpha, 'b', w - 5, name)
+
         if data.avatar then
             renderer.texture(data.avatar.texture, e.x + e.w - (invert and 34 or e.w - 10), base_y - y + h / 2 - 24 / 2, 24, 24, 255, 255, 255, data.lerps.full_alpha, 'f')
         end
-        
-        renderer.text(e.x + e.w - x + w / 2 - tW / 2, base_y - y + h / 2 - tH / 2, 255, 255, 255, data.lerps.full_alpha, 'b', w - 5, name)
     end
     
 end, x, y, w, h, nil, true, true)
@@ -2007,7 +2055,7 @@ aa:add(ui.new_label('Lua', 'A', format('Wings', ' Anti-Aim')))
 aa:add({ui.new_label('Lua', 'B', ' Experimental feature.'), ui.new_label('Lua', 'B', '\n')})
 
 local aa_enabled = ui.new_checkbox('Lua', 'B', format(' Anti-Aim', 'Enabled'))
-local page = ui.new_combobox('Lua', 'B', format(' Anti-Aim', 'Page'), 'Other', 'Builder')
+local page = ui.new_combobox('Lua', 'B', format(' Anti-Aim', 'Page'), 'Other', 'Builder', 'Config')
 aa:add(page, function() return ui.get(aa_enabled) end)
 aa:add(aa_enabled)
 
@@ -2017,6 +2065,8 @@ local manuals = {
     {'Manual Forward', 180},
     {'Manual Reset', nil}
 }
+
+local config = {} 
 
 --#region BUILDER
 --#region STATES
@@ -2411,6 +2461,8 @@ local ui_map = {
 for i, v in pairs(states) do
     assert('+ ' .. wings.color.base .. v.display)
 
+    config[v.id] = config[v.id] or {}
+
     v.ui = v.ui or {}
 
     aa:add(ui.new_label('Lua', 'A', '\n'), function() return ui.get(page) == 'Builder' and ui.get(state) == v.display and ui.get(aa_enabled) end) 
@@ -2421,12 +2473,27 @@ for i, v in pairs(states) do
         override = ui.new_checkbox('Lua', 'A', format(' Anti-Aim', v.display, 'Override'))
         aa:add(override, function() return ui.get(page) == 'Builder' and ui.get(state) == v.display and ui.get(aa_enabled) end)
         v.ui.override = {id = override, map = ui_map}
+
+        config[v.id].override = false
+
+        ui.set_callback(override, function()
+            config[v.id].override = ui.get(override)
+
+            --assert(v.id .. ' : override = ' .. tostring(ui.get(override)))
+        end)
     end
 
     for _, data in pairs(ui_map) do
         local result = ui['new_' .. data.type]('Lua', (data.tab or 'A'), string.format(data.display, v.display), unpack(data.unpack))
         aa:add(result, function() return ui.get(page) == 'Builder' and ui.get(state) == v.display and ui.get(aa_enabled) and ((data.depency and data.depency(v.ui, v)) or not data.depency) and (v.id == 'global' or ui.get(override)) end)
         v.ui[data.id] = {id = result, map = data}
+
+        config[v.id][data.id] = ui.get(result)
+        ui.set_callback(result, function()
+            config[v.id][data.id] = ui.get(result)
+            
+            --assert(v.id .. ' : ' .. data.id .. ' = ' .. tostring(ui.get(result)))
+        end)
     end
 end
 
@@ -2590,6 +2657,107 @@ wings.hooks.paint.freestand = function()
 end
 --#endregion
 
+--#region CONFIG
+local list = ui.new_listbox('Lua', 'A', format(' Anti-Aim', 'Configs'), 'No configs.')
+local raw_base = {}
+
+local function update()
+    local dbase = db.configs
+    raw_base = {}
+
+    for i, v in pairs(dbase) do
+        if type(i) ~= 'string' or type(v) ~= 'table' or #i < 2 then goto continue end
+        table.insert(raw_base, i)
+
+        ::continue::
+    end
+    if #raw_base < 1 then raw_base = {'No configs'} end
+
+    ui.update(list, raw_base)
+end
+
+update()
+
+local function get_select()
+    local now = ui.get(list)
+    if not now then return '?' end
+
+    return raw_base[now + 1] or '?'
+end
+
+local config_name = ui.new_textbox('Lua', 'A', format(' Anti-Aim', 'Config Name'))
+
+local function load_cfg(cfg)
+    if not cfg then --[[assert('Failed to find config!')]] return false end
+
+    for i, v in pairs(states) do
+        local state_cfg = cfg[v.id]
+
+        if not state_cfg then --[[assert('Failed to find state \"' .. v.id .. '\" in config.')]] goto continue end
+
+        for _, e in pairs(v.ui) do
+            local ui_cfg = state_cfg[_]
+            
+            if not ui_cfg then --[[assert('Failed to find element \"' .. _.. '\" in \"' .. v.id .. '\"')]] goto continue end
+            
+            ui.set(e.id, ui_cfg)
+            ::continue::
+        end
+
+        ::continue::
+    end
+end
+
+local load = ui.new_button('Lua', 'A', ' ' .. wings.color.base .. 'FFLoad', function()
+    local selected = get_select()
+    local cfg = db.configs[selected]
+    load_cfg(cfg)
+end)
+
+local save = ui.new_button('Lua', 'A', ' ' .. wings.color.base .. 'FFSave', function()
+    local selected = ui.get(config_name)
+    if #selected < 2 then ui.set(config_name, 'Provide more than 2 symbols!') return false end
+
+    db.configs[selected] = config
+
+    save()
+
+    --for i, v in pairs(db.configs[selected]) do
+    --    assert('State: ' .. i)
+    --
+    --    for _, e in pairs(v) do
+    --        assert('State: ' .. i .. ', element:' .. _ .. ' value: ' .. tostring(e))
+    --    end
+    --end
+
+    update()
+end)
+
+local remove = ui.new_button('Lua', 'A', ' ' .. wings.color.base .. 'FFDelete', function()
+    local selected = get_select()
+    db.configs[selected] = nil
+
+    update()
+end)
+
+local import = ui.new_button('Lua', 'B', ' ' .. wings.color.base .. 'FFImport from clipboard', function()
+    load_cfg(json.parse(base64.decode(clipboard.get() or '')))
+end)
+
+local export = ui.new_button('Lua', 'B', ' ' .. wings.color.base .. 'FFExport from clipboard', function()
+    clipboard.set(base64.encode(json.stringify(config)))
+end)
+
+ui.set_callback(list, function()
+    local selected = get_select()
+
+    ui.set(config_name, selected)
+end)
+
+aa:add({list, config_name, load, save, remove, import, export}, function() return ui.get(page) == 'Config' and ui.get(aa_enabled) end)
+
+--#endregion
+
 --#endregion
 
 --#endregion
@@ -2673,7 +2841,7 @@ local handle_one = function(ent)
     local name, steam = entity.get_player_name(ent), entity.get_steam64(ent)
     if not name or not steam then return false end
 
-    if chat_db[tostring(steam)] then
+    if db.chat[tostring(steam)] then
         mute.set(ent, true)
 
         add_render('Player automatically muted. (' .. name .. ')')
@@ -2712,13 +2880,13 @@ local commands = {
                 if not target then add_render('Player not found!', {255, 0, 0}); cprint('{white}' .. find .. '{grey} not found!') return false end
                 local name, steam = entity.get_player_name(target), entity.get_steam64(target)
         
-                if chat_db[tostring(steam)] then add_render('Player already muted.', {255, 0, 0}); cprint('{white}' .. name .. '{grey} already premuted!') return false end
+                if db.chat[tostring(steam)] then add_render('Player already muted.', {255, 0, 0}); cprint('{white}' .. name .. '{grey} already premuted!') return false end
         
                 mute.set(target, true)
                 add_render('Player added to premute. (' .. name .. ')')
                 cprint('{white}' .. name .. '{grey} added to premute!')
         
-                chat_db[tostring(steam)] = name
+                db.chat[tostring(steam)] = name
             end,
             remove = function()
                 table.remove(args, 1)
@@ -2726,7 +2894,7 @@ local commands = {
         
                 local target, direct
 
-                if chat_db[find] then
+                if db.chat[find] then
                     target = find
                     direct = true
                 else
@@ -2739,22 +2907,22 @@ local commands = {
                 if not direct then
                     name, steam = entity.get_player_name(target), entity.get_steam64(target)
                 else
-                    name, steam = chat_db[find], find
+                    name, steam = db.chat[find], find
                 end
         
-                if not chat_db[tostring(steam)] then add_render('Player aint muted.', {255, 0, 0}); cprint('{white}' .. name .. '{grey} aint premuted!') return false end
+                if not db.chat[tostring(steam)] then add_render('Player aint muted.', {255, 0, 0}); cprint('{white}' .. name .. '{grey} aint premuted!') return false end
         
                 if not direct then mute.set(target, false) end
                 add_render('Player removed from premute. (' .. name .. ')')
                 cprint('{white}' .. name .. '{grey} removed from premute!')
         
-                chat_db[tostring(steam)] = nil
+                db.chat[tostring(steam)] = nil
             end,
             list = function()
-                local count = 0; for i, v in pairs(chat_db) do count = count + 1 end
+                local count = 0; for i, v in pairs(db.chat) do count = count + 1 end
                 cprint('List of premuted users (' .. count .. '): ')
 
-                for i, v in pairs(chat_db) do
+                for i, v in pairs(db.chat) do
                     cprint('{grey}' .. tostring(v) .. '{white} (' .. tostring(i) .. ')')
                 end
             end,
@@ -2779,15 +2947,16 @@ local commands = {
         
         local name, steam
         local target = resolve_player(find)
-        if not target and dox_db[find] then target = dox_db[find]; name, steam = dox_db[find][#dox_db[find]], find end
+        if not target and db.dox[find] then target = db.dox[find]; name, steam = db.dox[find][#db.dox[find]], find end
 
         if not target then add_render('Player not found!', {255, 0, 0}); cprint('{white}' .. find .. '{grey} not found!') return false end
         local name, steam = name or entity.get_player_name(target), steam or entity.get_steam64(target)
         cprint('{white}' .. name .. ' {grey}' .. steam)
-        local db = dox_db[tostring(steam)]
-        if chat_db[tostring(steam)] then cprint('{white}Premuted with nickname: {grey}' .. chat_db[tostring(steam)]) end
+
+        if db.chat[tostring(steam)] then cprint('{white}Premuted with nickname: {grey}' .. db.chat[tostring(steam)]) end
+        local dbase = db.dox[tostring(steam)]
         
-        if not db then return false end
+        if not dbase then return false end
 
         local map = {
             {'first_time', function(v)
@@ -2803,13 +2972,14 @@ local commands = {
             end},
         }
 
-        for i, v in pairs(map) do if db[v[1]] then pcall(v[2], db[v[1]]) end end
+        for i, v in pairs(map) do if dbase[v[1]] then pcall(v[2], dbase[v[1]]) end end
     end,
     clear_keys = function(args)
         if args[1] ~= 'confirm' then cprint('{red}This command will delete all keys.') cprint('{grey}If u want to continue use: {white}clear_keys confirm') return false end
 
-        dox_db = {}
-        chat_db = {}
+        db.dox = {}
+        db.chat = {}
+
         cprint('{grey}Succesfully deleted {white}keys{grey}.')
     end
 }
@@ -3042,9 +3212,9 @@ if wings.settings.dev then
     end
 
     widgets.new('dev_widget_small', nil, 60, 110, 50, 50, nil, true, true)
+    widgets.new('dev_widget_medium+', nil, 330, 110, 50, 320, nil, true, true)
     widgets.new('dev_widget_medium', nil, 120, 110, 200, 50, nil, true, true)
     widgets.new('dev_widget_large', nil, 60, 170, 260, 260, nil, true, true)
-    widgets.new('dev_widget_medium+', nil, 330, 110, 50, 320, nil, true, true)
 end
 
 --#endregion
