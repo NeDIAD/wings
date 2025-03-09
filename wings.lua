@@ -10,7 +10,7 @@
 
 local wings = {hooks = {}, start = client.timestamp()}
 
-local hooks = {'paint', 'paint_ui', 'player_score', 'round_end', 'client_disconnect', 'player_say', 'shutdown', 'string_cmd', 'player_connect_full', 'override_view', 'player_changename', 'player_spawn', 'net_update_start', 'aim_hit', 'aim_miss', 'aim_fire', 'setup_command', 'run_command', 'predict_command'}
+local hooks = {'paint', 'paint_ui', 'player_score', 'round_end', 'player_say', 'shutdown', 'string_cmd', 'player_connect_full', 'override_view', 'player_changename', 'player_spawn', 'net_update_start', 'aim_hit', 'aim_miss', 'aim_fire', 'setup_command', 'run_command', 'predict_command'}
 for i, v in pairs(hooks) do wings.hooks[v] = {} end
 
 local http = require('gamesense/http')
@@ -1678,17 +1678,14 @@ local spec_data, loaded_avatars = {}, {}
 
 wings.hooks.player_connect_full.spectators = function(e)
     local ent = client.userid_to_entindex(e.userid)
+    local steam = entity.get_steam64(ent)
 
     if ent == entity.get_local_player() then loaded_avatars = {} spec_data = {} end
-    loaded_avatars[ent] = nil
-    spec_data[ent] = nil
+    loaded_avatars[tostring(steam)] = nil
+    spec_data[tostring(steam)] = nil
     
 end
 
-wings.hooks.client_disconnect.spectators = function()
-    loaded_avatars = {}
-    spec_data = {}
-end
 
 local spec_widget = widgets.new('spectators_list', function(self)
     local e = self.animate
@@ -1719,7 +1716,7 @@ local spec_widget = widgets.new('spectators_list', function(self)
             spec_data[spec] = (not spec_data[spec] or target ~= i) and {
                 id = spec,
                 lerps = {},
-                avatar = loaded_avatars[steam] or false,
+                avatar = loaded_avatars[tostring(steam)] or false,
             } or spec_data[spec]
 
             if not spec_data[spec].avatar and steam and avatar then
