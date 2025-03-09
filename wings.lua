@@ -1679,12 +1679,15 @@ local spec_data, loaded_avatars = {}, {}
 wings.hooks.player_connect_full.spectators = function(e)
     local ent = client.userid_to_entindex(e.userid)
 
-    if ent == entity.get_local_player() then loaded_avatars = {} end
+    if ent == entity.get_local_player() then loaded_avatars = {} spec_data = {} end
     loaded_avatars[ent] = nil
+    spec_data[ent] = nil
+    
 end
 
 wings.hooks.client_disconnect.spectators = function()
     loaded_avatars = {}
+    spec_data = {}
 end
 
 local spec_widget = widgets.new('spectators_list', function(self)
