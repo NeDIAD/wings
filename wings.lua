@@ -639,13 +639,13 @@ local render do
     render = {}
     
     function render.rectangle(x, y, w, h, r, g, b, a, radius, ignore_corner)
-        x = type(x) == 'number' and x or 0; y = type(y) == 'number' and y or 0; w = type(w) == 'number' and w or 0; h = type(h) == 'number' and h or 0; r = r or 255 g = g or 255 b = b or 255 a = a or 255 radius = radius or 8
+        x = type(x) == 'number' and x or 0; y = type(y) == 'number' and y or 0; w = type(w) == 'number' and w or 0; h = type(h) == 'number' and h or 0; r = r or 255 g = g or 255 b = b or 255 a = a or 0 radius = radius or 8
         x = math.floor(x); y = math.floor(y); w = math.floor(w); h = math.floor(h)
 
         ignore_corner = type(ignore_corner) == 'table' and ignore_corner or {}
         local off_corner = {lb = true, lt = true, rb = true, rt = true}
 
-        if x < 10 or y < 10 or w < 10 or h < 10 then ignore_corner = off_corner end
+        if --[[x < 10 or y < 10 or]] w < 10 or h < 10 then ignore_corner = off_corner end
 
         renderer.rectangle(x + radius, y, w - 2 * radius, h, r, g, b, a)
         renderer.rectangle(x, y + radius, radius, h - 2 * radius, r, g, b, a)
@@ -677,7 +677,6 @@ local render do
     end
 
     function render.glow(x, y, w, h, r, g, b, a, radius, ignore_corner, thickness, smooth)
-        
         smooth = type(smooth) == 'table' and smooth or {}
         thickness = type(thickness) == 'number' and thickness or 10
 
@@ -694,7 +693,6 @@ local render do
 
             if alpha == 5 then break end
         end
-
     end
 
     print(wings.color.green .. '» ' .. wings.color.base .. 'Render Library', wasted())
@@ -722,9 +720,6 @@ local mouse do
         local newX = mX - offsetX
         local newY = mY - offsetY
 
-        --assert('x1, x2, y1, y2, resX, resY: '..' '.. x1..' '.. x2..' '.. y1..' '.. y2..' '.. newX..' '.. newY)
-        --assert('mX, mY, scrW, scrH: '.. mX ..' '.. mY..' '.. scrW..' '.. scrH)
-
         if newX < 0 then newX = 0 end
         if newY < 0 then newY = 0 end
         if newX + w > scrW then newX = scrW - w end
@@ -740,6 +735,7 @@ local widgets do
     widgets = {}
     widgets.__index = widgets
     widgets.widgets = {}
+    widgets.dragging = nil
     local scrW, scrH = client.screen_size()
 
     local mouse_magnet = {
@@ -747,158 +743,167 @@ local widgets do
         x = {scrW / 2}
     }
 
-    
-    function widgets.new(id, push, x, y, w, h, draggable, tooltip, lock_size)
+    function widgets.new(id, push, x, y, w, h, draggable, tooltip)
         if not id or widgets.widgets[id] then return false end
-        push = type(push) == 'function' and push or function() end
-        x, y, w, h = type(x) == 'number' and x or 0, type(y) == 'number' and y or 0, type(w) == 'number' and w or 50, type(h) == 'number' and h or 50
-        
-        draggable = type(draggable) == 'table' and draggable or { x = true, y = true }
 
-        local self = setmetatable({}, widgets)
-        
-        self.current = {x = x, y = y, w = w, h = h}
-        self.animate = {x = x, y = y, w = w, h = h}
-        self.paint = true
+        push = push or function() return false end
+        x = x or 0; y = y or 0; w = w or 50; h = h or 50 -- important variables
 
-        local function line(x1, y1, x2, y2) renderer.line(x1, y1, x2, y2, 255, 255, 255, (self.line_alpha or 0)) end
+        draggable = draggable or {x = true, y = true}
 
-        local function slider(scale, init, align)
+        local self = {}
 
-            --[[
-                align:true = Y
-                align:false = X
-            ]]
+        local function slider(name, value, align)
+            local new = ui.new_slider('CONFIG', 'Presets', id .. ':' .. name, 0, (align and scrH or scrW), value)
+            ui.set_visible(new, wings.settings.dev)
 
-            local slide = ui.new_slider('CONFIG', 'Presets', id .. ':' .. scale, 0, (align and scrH or scrW), init)
-            if not wings.settings.dev then ui.set_visible(slide, false) end
+            ui.set_callback(new, function()
+                if not self or not self.current or not self.current[name] then return false end
 
-           return slide
+                self.current[name] = ui.get(new)
+            end)
+
+            return new
         end
 
-        self.ui = {
-            x = slider('x', x),
-            y = slider('y', y, true),
+        local function line(x1, y1, x2, y2) renderer.line(x1, y1, x2, y2, 255, 255, 255, (self.alpha.addition or 0)) end
+
+        self = {
+            current = {x = x, y = y, w = w, h = h},
+            animate = {x = x, y = y, w = w, h = h},
+            
+            alpha = {first = 0, second = 0, addition = 0},
+            
+            ui = {
+                x = slider('x', x, false),
+                --w = slider('w', w, false),
+
+                y = slider('y', y, true),
+                --h = slider('h', h, true),
+            },
+
+            paint = true, -- !!!
+            snap = false, -- !!!
         }
 
-        self.current = {x = x, y = y, w = w, h = h}
-        self.animate = {x = x, y = y, w = w, h = h}
+        local input = {} -- mouse
 
-        self.alpha = 0
-        self.drag_alpha = 0
+        local alpha_markup = {
+            first = 0, second = 0, addition = 0 -- targets       
+        }
 
-        if not lock_size then
-            self.ui.w = slider('w', w)
-            self.ui.h = slider('h', h, true)
-        end
+        function self.push()
+            if not self or not self.current or not self.animate or not self.alpha then return false end -- prevention
 
-        for scale, slider in pairs(self.ui) do
-            ui.set_callback(slider, function() self.current[scale] = ui.get(slider) end)
-        end
-
-        self.push = function()
-            if not self.current or not self.animate or not self.ui or not self.alpha or not self.drag_alpha then return false end
-
-            for scale, value in pairs(self.current) do
-                if self.animate[scale] == value then goto continue end
-                
-                self.animate[scale] = math.lerp(globals.frametime() * 10, self.animate[scale], value)
-                
-                ::continue::
+            -- current -> animate
+            for cord, value in pairs(self.current) do
+                self.animate[cord] = math.lerp(globals.frametime() * 10, self.animate[cord], value)
             end
-            
-            if not self.paint and self.alpha < 10 then return false end
+        
+            -- alpha
+            for state, value in pairs(self.alpha) do
+                local markup = alpha_markup[state] or alpha_markup.first
 
-            self.snap = ui.is_menu_open() and self.drag and not client.key_state(0x10) and tooltip
-            
-            if ui.is_menu_open() or not globals.mapname() then
-                
-                local check = self.drag or mouse.inbounds(self.current.x, self.current.y, self.current.w, self.current.h)
-                self.alpha = math.lerp(globals.frametime() * 10, self.alpha, (check and self.paint) and (self.drag and 150 or 120) or (self.paint and 100 or 0))
-                self.drag_alpha = math.lerp(globals.frametime() * 3, self.drag_alpha, widgets.drag_id == id and 200 or 0)
-                renderer.rectangle(0, 0, scrW, scrH, 0, 0, 0, self.drag_alpha)
+                self.alpha[state] = math.lerp(globals.frametime() * 15, value, markup)
+                self.alpha[state] = math.clamp(self.alpha[state], 0, 255) -- For some reason while loading in map or while low fps, alpha starts blinking.
+            end
 
-                if mouse.held() and check and (draggable.x or draggable.y) and (not widgets.drag_id or widgets.drag_id == id) then
-                    widgets.drag_id = id
-                    
-                    if not self.drag then 
-                        self.drag = {sX = self.current.x, sY = self.current.y} 
-                        self.drag.mX, self.drag.mY = ui.mouse_position()
-                    end
-                    local x, y = mouse.calc(self.drag.sX, self.drag.sY, self.drag.mX, self.drag.mY, self.current.w, self.current.h)
-                    
-                    local scales = {
-                        x = x,
-                        y = y
-                    }
-                    
-                    if self.snap then
-                        for scale, magnet in pairs(mouse_magnet) do
-                            if not draggable[scale] then goto continue end
-                            
-                            for i, value in ipairs(magnet) do
-                                if math.abs(scales[scale] - value) <= self.current[scale == 'x' and 'w' or 'h'] then
-                                    scales[scale] = value - self.current[scale == 'x' and 'w' or 'h'] / 2
-                                    if scales[scale] < 0 then scales[scale] = value end
-                                    if scales[scale] > (scale == 'x' and scrW - self.current.w or scrH - self.current.h) then scales[scale] = value - self.current[scale == 'x' and 'w' or 'h']  end
-                                end
-                            end
-                            
-                            ::continue::
-                        end
-                    end
-                    
-                    if draggable.x then ui.set(self.ui.x, scales.x) end
-                    if draggable.y then ui.set(self.ui.y, scales.y) end
-                else
-                    if widgets.drag_id == id then widgets.drag_id = nil end
-                    self.drag = nil
-                end
-                
+            if not self.paint or not ui.is_menu_open() then 
+                alpha_markup = {
+                    first = 0, second = 0, addition = 0    
+                }
             else
-                self.alpha = math.lerp(globals.frametime() * 10, self.alpha, 0)
+                alpha_markup = {
+                    first = (input.state and 120 or 70),
+                    second = (input.state and 210 or 170),
+                    addition = 0,
+                }
             end
+
+            -- disable draw
+            if not self.paint and self.alpha.first < 5 then return false end -- :(
+
+            self.snap = tooltip and not client.key_state(0x10)
+            alpha_markup.addition = (input.state and self.snap) and 150 or 0
+
+            local status, err = pcall(push, self) -- handling push function
+            if not status then assert('Error: ' .. err) end
+
+            -- rendering widget base
+            local base, raw = self.animate, self.current
             
-            if (self.alpha or 0) > 5 then
-                local c = self.animate
+            --[[
+                Snap to lines works weird with preventing floating point :)
+
+            for cord, value in pairs(base) do base[cord] = math.floor(value) end -- preventing floating point
+            for cord, value in pairs(raw) do raw[cord] = math.floor(value) end 
+            --]]
+
+            render.rectangle(0, 0, scrW, scrH, 0, 0, 0, self.alpha.addition, 0)
+            render.rectangle(base.x, base.y, base.w, base.h, 165, 165, 165, self.alpha.first, 8)
+
+            local padding = -2
+            render.rectangle(base.x - padding / 2, base.y - padding / 2, base.w + padding, base.h + padding, 25, 25, 25, self.alpha.second, 8)
+            
+            -- mouse
+            if mouse.held() and (mouse.inbounds(raw.x, raw.y, raw.w, raw.h) or input.state) and (not widgets.dragging or widgets.dragging == id) then
+                input.state = true
+
+                widgets.dragging = id
+
+                if not input.current then 
+                    input.current = {}
                 
-                render.rectangle(c.x, c.y, c.w, c.h, 255, 255, 255, math.max(0, self.alpha - 50), 4)
-                
-                local padd = 1
-                render.rectangle(c.x + padd, c.y + padd, c.w - padd * 2, c.h - padd * 2, 0, 0, 0, self.alpha, 4)
+                    input.current.widget = {x = raw.x, y = raw.y}
 
-                self.line_alpha = math.lerp(globals.frametime() * 10, self.line_alpha, (self.drag and self.snap) and 200 or 0)
+                    local mX, mY = ui.mouse_position()
+                    input.current.mouse = {x = mX, y = mY}
+                end
+                local x, y = mouse.calc(input.current.widget.x, input.current.widget.y, input.current.mouse.x, input.current.mouse.y, raw.w, raw.h)
 
-                if (self.line_alpha or 0) > 5 and tooltip then
+                -- snap to lines
+                local scales = {
+                    x = x,
+                    y = y
+                }
 
-                    for scale, magnets in pairs(mouse_magnet) do
+                if self.snap then
+                    for scale, magnet in pairs(mouse_magnet) do
                         if not draggable[scale] then goto continue end
                         
-                        for i, value in ipairs(magnets) do
-                            local style = (scale == 'y' and {0, value, scrW, value} or {value, 0, value, scrH})
-                            
-                            line(unpack(style))
+                        for i, value in ipairs(magnet) do
+                            if math.abs(scales[scale] - value) <= self.current[scale == 'x' and 'w' or 'h'] then
+                                scales[scale] = value - self.current[scale == 'x' and 'w' or 'h'] / 2
+                                if scales[scale] < 0 then scales[scale] = value end
+                                if scales[scale] > (scale == 'x' and scrW - self.current.w or scrH - self.current.h) then scales[scale] = value - self.current[scale == 'x' and 'w' or 'h']  end
+                            end
                         end
                         
                         ::continue::
                     end
-                    
-                    if draggable.x or draggable.y then 
-                        local text = wings.color.base .. 'FFSHIFT' .. wings.color.gray .. 'FF - Disable snap to grid'
-                        local tW, tH = renderer.measure_text('b+', text)
-                        self.text_multi = math.lerp(globals.frametime() * 10, self.text_multi, (self.drag and self.snap) and tW + 35 or 0)
+                end
 
-                        renderer.text(scrW / 2, scrH - 100, 255, 255, 255, 255, 'cb+', math.max(1, self.text_multi), text) 
-                        renderer.text(self.animate.x + self.animate.w / 2, self.animate.y + self.animate.h / 2, 255, 255, 255, 255, 'cb+', math.max(1, self.text_multi), wings.color.gray .. 'FFX: ' .. wings.color.base .. 'FF' .. self.current.x .. wings.color.gray .. 'FF Y:' .. wings.color.base .. 'FF' .. self.current.y)
-                    end
+                if draggable.x then ui.set(self.ui.x, scales.x) end
+                if draggable.y then ui.set(self.ui.y, scales.y) end
+            elseif widgets.dragging == id then
+                widgets.dragging = nil
+                input = {}
+            end
+
+            if self.snap and self.alpha.addition > 5 then
+                for scale, magnet in pairs(mouse_magnet) do
+                    if not draggable[scale] then goto continue end
                     
+                    for i, value in pairs(magnet) do
+                        local style = (scale == 'y' and {0, value, scrW, value} or {value, 0, value, scrH})
+                        line(unpack(style))
+                    end
+               
+                    ::continue::
                 end
             end
-            
-            local status, err = pcall(push, self.animate, self)
-            if not status then assert(err) end
         end
-        
+
         widgets.widgets[id] = self
         
         return self
@@ -906,12 +911,8 @@ local widgets do
 
     wings.hooks.paint_ui.widgets_handler = function()
         for id, self in pairs(widgets.widgets) do
-            if type(self) ~= 'table' or type(self.push) ~= 'function' then assert('Type error! '.. id) goto continue end
-
-            local status, err = pcall(function() self.push() end)
-            if not status then assert('Error: '.. err) end
-
-            ::continue::
+            local status, err = pcall(self.push)
+            if not status then assert('Error: ' .. err) end
         end 
     end
 
@@ -1531,8 +1532,10 @@ local scrW, scrH = client.screen_size()
 local tW, tH = renderer.measure_text('b', '100')
 local indicator_t, indicator_a = 0, 0
 
-local indicator = widgets.new('mindmg_indicator', function(e, self)
-    local m, a = self.alpha * 2.5, 255
+local indicator = widgets.new('mindmg_indicator', function(self)
+    local e = self.animate
+
+    local m, a = self.alpha.first * 2.5, 255
     local target = dmg2
     if ui.get(dmg) and ui.get(dmg + 1) then target = dmg + 2 end
 
@@ -1640,8 +1643,9 @@ local x, y = scrW - w - 90, scrH / 2 - h / 2
 
 local spec_data, loaded_avatars = {}, {}
 
-local spec_widget = widgets.new('spectators_list', function(e, self)
-    
+local spec_widget = widgets.new('spectators_list', function(self)
+    local e = self.animate
+
     local lp = entity.get_local_player()
 
     local spectators, target = {}, lp -- Solus V2
@@ -1706,14 +1710,13 @@ local spec_widget = widgets.new('spectators_list', function(e, self)
         data.lerps.width = math.lerp(globals.frametime() * 20, data.lerps.width, w)
 
         local x, y, w = math.floor(data.lerps.offset_x), math.floor(data.lerps.offset_y), math.floor(data.lerps.width)
-
-        render.rectangle(e.x + e.w - x, base_y - y, w, h, 100, 100, 100, data.lerps.alpha, 8)
         
+        render.rectangle(e.x + e.w - x, base_y - y, w, h, 100, 100, 100, data.lerps.alpha, 8)
+        renderer.text(e.x + e.w - x + w / 2 - tW / 2, base_y - y + h / 2 - tH / 2, 255, 255, 255, data.lerps.full_alpha, 'b', w - 5, name)
+
         if data.avatar then
             renderer.texture(data.avatar.texture, e.x + e.w - (invert and 34 or e.w - 10), base_y - y + h / 2 - 24 / 2, 24, 24, 255, 255, 255, data.lerps.full_alpha, 'f')
         end
-        
-        renderer.text(e.x + e.w - x + w / 2 - tW / 2, base_y - y + h / 2 - tH / 2, 255, 255, 255, data.lerps.full_alpha, 'b', w - 5, name)
     end
     
 end, x, y, w, h, nil, true, true)
@@ -3042,9 +3045,9 @@ if wings.settings.dev then
     end
 
     widgets.new('dev_widget_small', nil, 60, 110, 50, 50, nil, true, true)
+    widgets.new('dev_widget_medium+', nil, 330, 110, 50, 320, nil, true, true)
     widgets.new('dev_widget_medium', nil, 120, 110, 200, 50, nil, true, true)
     widgets.new('dev_widget_large', nil, 60, 170, 260, 260, nil, true, true)
-    widgets.new('dev_widget_medium+', nil, 330, 110, 50, 320, nil, true, true)
 end
 
 --#endregion
