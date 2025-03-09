@@ -365,7 +365,7 @@ wings.color = {
 wings.settings = {
     prefix = '   ' .. wings.color.base .. 'wings' .. wings.color.white .. ' » ',
     chat_prefix = '{purple} wings {white} » {grey}',
-    dev = true,
+    dev = false,
     build = 'Development build v0.1'
 }
 
