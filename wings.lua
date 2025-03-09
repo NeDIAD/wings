@@ -10,7 +10,7 @@
 
 local wings = {hooks = {}, start = client.timestamp()}
 
-local hooks = {'paint', 'paint_ui', 'player_score', 'round_end', 'player_say', 'shutdown', 'string_cmd', 'player_connect_full', 'override_view', 'player_changename', 'player_spawn', 'net_update_start', 'aim_hit', 'aim_miss', 'aim_fire', 'setup_command', 'run_command', 'predict_command'}
+local hooks = {'paint', 'round_start', 'level_init', 'paint_ui', 'player_score', 'player_death', 'round_end', 'player_say', 'shutdown', 'string_cmd', 'player_connect_full', 'override_view', 'player_changename', 'player_spawn', 'net_update_start', 'aim_hit', 'aim_miss', 'aim_fire', 'setup_command', 'run_command', 'predict_command'}
 for i, v in pairs(hooks) do wings.hooks[v] = {} end
 
 local http = require('gamesense/http')
@@ -2363,9 +2363,9 @@ local ui_map = {
     {
         tab = 'B',
         id = 'defensive',
-        display = format(' Anti-Aim', '%s', 'Defensve'),
+        display = format(' Anti-Aim', '%s', 'Defensive'),
         type = 'combobox',
-        unpack = {'Off', 'On Peek', 'Always'},
+        unpack = {'Off', 'On Peek', 'Always', 'TickBase'},
         update = function(self) end,
     },
 
@@ -2555,6 +2555,28 @@ wings.hooks.paint.antiaim = function()
     end
 end
 
+wings.hooks.player_death.defensive = function(e)
+    if client.userid_to_entindex(e.userid) ~= entity.get_local_player() then return false end
+
+    antiaim.ticks = {}
+end
+
+wings.hooks.level_init.defensive = function() antiaim.ticks = {} end
+wings.hooks.round_start.defensive = function() antiaim.ticks = {} end
+wings.hooks.round_end.defensive = function() antiaim.ticks = {} end
+
+wings.hooks.run_command.defensive = function(e)
+    antiaim.ticks = antiaim.ticks or {}
+    antiaim.ticks.choke = e.chokedcommands
+end
+
+wings.hooks.predict_command.defensive = function(e)
+    antiaim.ticks = antiaim.ticks or {}
+    antiaim.ticks.max = antiaim.ticks.max or client.get_cvar('sv_maxusrcmdprocessticks') - 1
+    antiaim.ticks.processed = math.clamp(math.abs(entity.get_prop(entity.get_local_player(), 'm_nTickBase') - (antiaim.ticks.diff or 0)), 0, antiaim.ticks.max - (antiaim.ticks.choke or 0))
+    antiaim.ticks.diff = math.max(entity.get_prop(entity.get_local_player(), 'm_nTickBase'), antiaim.ticks.diff or 0)
+end
+
 wings.hooks.setup_command.antiaim = function(e)
     antiaim.defensive = false
 
@@ -2574,13 +2596,15 @@ wings.hooks.setup_command.antiaim = function(e)
     local defensive = {
         Off = function() e.force_defensive = false end,
         ['On Peek'] = function() e.force_defensive = antiaim.peeking; e.allow_send_packet = not antiaim.peeking end,
-        ['Always'] = function() e.force_defensive = true end,
+        Always = function() e.force_defensive = true end,
+        TickBase = function() e.force_defensive = antiaim.ticks and antiaim.ticks.processed > 1 and antiaim.ticks.processed < antiaim.ticks.max - 1 end
     }
 
     if not antiaim.manual then
+
         local def = ui.get(state.ui.defensive.id)
         local allow_defensive = ((ui.get(refs.dt[1]) and ui.get(refs.dt[2])) or (ui.get(refs.osaa[1]) and ui.get(refs.osaa[2]))) and def ~= 'Off'
-        
+
         if not allow_defensive then
             e.force_defensive = allow_defensive
         elseif ui.get(refs.osaa[1]) and ui.get(refs.osaa[2]) then
