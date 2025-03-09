@@ -1183,7 +1183,7 @@ local notifications do
 
             self.data.y = math.lerp(globals.frametime() * 10, self.data.y, self.data.stop and scrH + 90 or y)
 
-            if self.data.stop and self.data.y > scrH - 60 then self.delete(self) return false end
+            if self.data.stop and self.data.y > scrH + 60 then self.delete(self) return false end
             local x = scrW / 2 - tW / 2
             local step = 5
 
