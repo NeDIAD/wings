@@ -1,3 +1,4 @@
+local commit = 'I\'m here to dev purpose :3'
 --[[
 
         /ᐠ. ｡.ᐟ\ᵐᵉᵒʷˎˊ˗ 
