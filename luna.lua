@@ -8,12 +8,116 @@
 
 local ffi = require 'ffi'
 
-local luna = { }
-luna.commit = commit or '?'
+local luna = {
+    mods = { },
+    commit = commit or '?',
+}
+
+luna.register = function(name, module)
+    if luna.mods[name] then error('That module already registered') return false end
+    luna.mods[name] = module
+    
+    return true
+end
+
+luna.export = function(name)
+    return luna.mods[name] or false
+end
+
+local table = setmetatable( { } , { __index = _G.table } )
+
+-- Unlink values
+---@param value table|any Value to unlink
+---@param deep number Deep of unlink
+---@return any
+table.unlink = function(value, deep)
+    deep = deep or math.huge
+
+    if type(value) ~= 'table' or deep < 1 then return value end
+    local unlink = { }
+    
+    for k, v in pairs(value) do
+        unlink[k] = table.unlink(v, deep - 1)
+    end
+
+    return unlink
+end
+
+-- Find value in table
+---@param origin table Table to recurse
+---@param value any Value to find
+---@param method? function Function to check
+---@return number | nil
+table.find = function(origin, value, method)
+    method = method or function(this) return this == value end
+
+    for k, v in ipairs(origin) do
+        local found = method(v)
+        if found then return k end
+    end
+end
+
+local math = setmetatable( { } , { __index = _G.math } )
+
+-- Round values
+---@param ... number Values to round
+---@return number
+math.round = function(...)
+    local pack, data = { }, { ... }
+    for _, v in ipairs(data) do
+        pack[_] = math.floor(v + .5)
+    end
+    return unpack(pack)
+end
+
+-- Rainbow color
+---@param speed number Speed of rainbow
+---@return number, number, number
+math.rainbow = function(speed)
+    speed = speed or 1
+    
+    local time = globals.realtime() * speed
+
+    return math.floor(math.sin(time) * 127 + 128), math.floor(math.sin(time + 2 * math.pi / 3) * 127 + 128), math.floor(math.sin(time + 4 * math.pi / 3) * 127 + 128)
+end
+
+-- Clamp number
+---@param value number Value to clamp
+---@param min number Minimal value
+---@param max number Maximum value
+---@return number
+math.clamp = function(value, min, max)
+    return math.max(min, math.min(value, max))
+end
+
+-- Lerp number
+---@param a number Start value
+---@param b number End value
+---@param t number Speed
+---@param force boolean Disable forcing
+---@return number
+math.lerp = function(a, b, t, force)
+    if not a or not b or not t then return 0 end
+
+    if math.abs(a - b) < .01 and not force then return b end
+    local lerp = a + (b - a) * t
+    return lerp
+end
+
+-- Pulsing value
+---@param min number Minimal value
+---@param max number Maximum value
+---@param speed number Speed
+---@param time number Custom time
+---@return number
+math.pulse = function(min, max, speed, time)
+    time = time or globals.realtime()
+
+    return (max + min) / 2 + math.sin(time * speed) * (max - min) / 2
+end
 
 local color = { } do
     ---@class Color
-    ---@
     local mt = { }
     mt.__index = mt
     mt.__tostring = function(self)
@@ -110,9 +214,6 @@ local color = { } do
     end
 end
 
---#endregion
-
---#region throw
 local throw = { } do
     throw.reset = color.new():hex()
 
@@ -140,359 +241,262 @@ local throw = { } do
         return true
     end
 end
---#endregion
 
---#region table
-local cTable = table
-local table = setmetatable({}, { __index = cTable })
+local hook = { } do
+    hook.unique = { }
+    hook.list = { }
 
--- Find value in table
----@param where table Where to find
----@param what any What to find
----@param fn? function Function to check
-table.find = function(where, what, fn)
-    fn = fn or function(v, need) return v == need end
-
-    for i, v in ipairs(where) do
-        if fn(v, what) then return i end
-    end
-
-    return nil
-end
-
--- Transform dictionary to array
----@param what table Dictionary to transform
----@param debug? number Style to transform, 1 = indexes, 2 = values
----@return table
-table.toArray = function(what, debug)
-    local array = {}
-    debug = debug or 2
-    
-    for _, v in pairs(what) do
-        local data = {_, v}
-        if debug == 1 then data = _ end
-        if debug == 2 then data = v end
-
-        table.insert(array, data)
-    end
-    
-    return array
-end
-
--- Unlink values
----@param what table|any Value to unlink
----@return any
-table.copy = function(what)
-    if type(what) ~= 'table' then return what end
-    local copy = {}
-
-    for i, v in ipairs(what) do
-        copy[i] = table.copy(v)
-    end
-
-    for i, v in pairs(what) do
-        copy[i] = table.copy(v)
-    end
-
-    return copy
-end
---#endregion
-
-
---#region math
-local cMath = math
-local math = setmetatable({}, { __index = cMath })
-
--- Round values
----@param ... number Values to round
----@return number
-math.round = function(...)
-    local pack, data = {}, { ... }
-    for _, v in ipairs(data) do
-        pack[_] = math.floor(v + .5)
-    end
-    return unpack(pack)
-end
-
--- Rainbow color
----@param speed number Speed of rainbow
----@return number, number, number
-math.rainbow = function(speed)
-    speed = speed or 1
-    
-    local time = globals.realtime() * speed
-
-    return math.floor(math.sin(time) * 127 + 128), math.floor(math.sin(time + 2 * math.pi / 3) * 127 + 128), math.floor(math.sin(time + 4 * math.pi / 3) * 127 + 128)
-end
-
--- Clamp number
----@param value number Value to clamp
----@param min number Minimal value
----@param max number Maximum value
----@return number
-math.clamp = function(value, min, max)
-    return math.max(min, math.min(value, max))
-end
-
--- Lerp number
----@param a number Start value
----@param b number End value
----@param t number Speed
----@param force boolean Disable forcing
----@return number
-math.lerp = function(a, b, t, force)
-    if not a or not b or not t then return 0 end
-
-    if math.abs(a - b) < .01 and not force then return b end
-    local lerp = a + (b - a) * t
-    return lerp
-end
-
--- Pulsing value
----@param min number Minimal value
----@param max number Maximum value
----@param speed number Speed
----@param time number Custom time
----@return number
-math.pulse = function(min, max, speed, time)
-    time = time or globals.realtime()
-
-    return (max + min) / 2 + math.sin(time * speed) * (max - min) / 2
-end
---#endregion
-
-luna.mods = { }
-
-luna.register = function(name, module)
-    if luna.mods[name] then error('That module already registered') return false end
-    luna.mods[name] = module
-    
-    return true
-end
-
-luna.export = function(name)
-    return luna.mods[name] or false
-end
-
---#region mods
-luna.register('color', color)
-luna.register('throw', throw)
-luna.register('table', table)
-luna.register('math', math)
-
--- tweaks
-local tweaks = {}
-
-tweaks.steam32 = function(steam3)
-    -- [U:1:XXXXXXXXX]
-    local id = tonumber(steam3)
-    if not id then return nil end
-
-    local id = ffi.new('uint64_t', tonumber(steam3))
-    local offset = ffi.new('uint64_t', 76561197960265728)
-    -- ^ lua + big numbers = inaccuracy
-
-    -- steam64 = steam3 + 76561197960265728
-    return tostring(id + offset):gsub('ULL', '')
-end
-
-tweaks.time = function(ts)
-    ts = ts or client.unix_time()
-
-    return panorama.loadstring(string.format([[
-        var date = new Date(%d * 1000);
-        var year = date.getFullYear();
-        var month = String(date.getMonth() + 1).padStart(2, '0');
-        var day = String(date.getDate()).padStart(2, '0');
-        var hours = String(date.getHours()).padStart(2, '0');
-        var minutes = String(date.getMinutes()).padStart(2, '0');
-        var seconds = String(date.getSeconds()).padStart(2, '0');
-        return year + '-' + month + '-' + day + ' ' + hours + ':' + minutes + ':' + seconds;
-    ]], ts))()
-end
-
-luna.register('tweaks', tweaks)
-
--- hook
-local hook = { list = { } , casted = { } }
-hook.mt = {}
-hook.mt.__index = hook.mt
-
-function hook.mt:remove()
-    local id = table.find(hook.list, self, function(this) return this.fn == self.fn end)
-    if id then table.remove(hook.list, id) end
-    
-    return id
-end
-
-hook.new = function(what, fn)
-    local mt = setmetatable({
-        hook = what,
-        fn = fn,
-    }, hook.mt)
-
-    table.insert(hook.list, mt)
-    if not hook.casted[what] then
-        pcall(hook.cast, what)
-    end
-
-    return mt
-end
-
-hook.call = function(what, ...)
-    for _, mt in ipairs(hook.list) do
-        if mt.hook == what then
-            mt.fn = type(mt.fn) == 'function' and mt.fn or function() return end
-            local status, reason = pcall(mt.fn, ...)
-            if not status then error(what .. ': ' .. reason) end
+    -- Get hook bound
+    ---@param mt Hook
+    ---@return string?, number?
+    function hook.get(mt)
+        for event, hooks in pairs(hook.list) do
+            local index = table.find(hooks, mt)
+            if index then return event, index end
         end
     end
 
-    return true
-end
+    -- Process event
+    ---@param event string Event to process
+    ---@param ... any Arguments
+    ---@return any
+    function hook.process(event, ...)
+        if not hook.list[event] then return false end
 
-hook.cast = function(what)
-    local cast = function(...)
-        hook.call(what, ...)
+        for k, mt in ipairs(hook.list[event]) do
+            pcall(mt.call, mt, ...)
+        end
     end
 
-    pcall(client.set_event_callback, what, cast)
-    hook.casted[what] = cast
+    -- Cast event
+    ---@param event string Event to cast
+    ---@return boolean
+    function hook.cast(event)
+        if hook.list[event] then return false end
 
-    return true
-end
+        hook.list[event] = { }
+        hook.unique[event] = function( ... ) return hook.process(event, ...) end
+        pcall(client.set_event_callback, event, hook.unique[event])
 
-hook.uncast = function(what)
-    local cast = hook.casted[what]
-    if not cast then return false end
-    pcall(client.unset_event_callback, what, cast)
-    hook.casted[what] = nil
-
-    return true
-end
-
-luna.register('hook', hook)
-
--- render
-local render = { }
-
-render.temp = {
-    blurReady = false, -- is blur ready
-}
-
-client.set_event_callback('paint_ui', function()
-    local map, lp = globals.mapname(), entity.get_local_player()
-    local team = entity.get_prop(lp, 'm_iTeamNum')
-    local isLoaded = true
-
-    if not map then isLoaded = false end
-    if not lp then 
-        isLoaded = false 
-    elseif not team or team == 0 then
-        isLoaded = false
+        return true
     end
 
-    render.temp.blurReady = isLoaded
-end)
+    -- Uncast event
+    ---@param event string Event to uncast
+    ---@return boolean
+    function hook.uncast(event)
+        if not hook.list[event] then return false end
 
--- render functions
-function render.blur(x, y, w, h) -- make blur available only in-game to prevent possible crash
-    x, y, w, h = math.round(x, y, w, h)
+        for k, mt in ipairs(hook.list[event]) do mt:unbind() end
+        pcall(client.unset_event_callback, event, hook.unique[event])
+        hook.unique[event] = nil
+        hook.list[event] = nil
 
-    if not render.temp.blurReady then return false end
-    renderer.blur(x, y, w, h)
-end
+        collectgarbage('collect')
 
-function render.glow(x, y, w, h, r, g, b, a, radius, size, quality)
-    quality = quality or 3
-    size = size or 5
+        return true
+    end
 
-    x, y, w, h, r, g, b, a, radius, size, quality = math.round(x, y, w, h, r, g, b, a, radius, size, quality)
-    
-    for i = size, 1, -1 do
-        local distance = (i - 1) / (size - 1)
-        render.rectangle_outline(x - i, y - i, w + i * 2, h + i * 2, r, g, b, a * math.exp(-distance * quality), radius + i, 1)
+    function hook.new(event, fn)
+        local mt = setmetatable( { fn = fn } , hook.mt )
+        mt:bind(event)
+
+        return mt
+    end
+
+    ---@class Hook
+    ---@field fn function Function to call
+    ---@field bound string Bound event
+    local mt = { }
+    mt.__index = mt
+    mt.__tostring = function(self) return 'Hook' end
+    hook.mt = mt
+
+    -- Return event and index
+    ---@param self Hook
+    ---@return string?, number?
+    function mt:whoami()
+        return hook.get(self)
+    end
+
+    -- Unbind hook
+    ---@param self Hook
+    ---@return boolean
+    function mt:unbind()
+        local event, index = self:whoami()
+        if not event or not index then return false end
+        self.bound = event
+
+        table.remove(hook.list[event], index)
+
+        return true
+    end
+
+    -- Bind hook
+    ---@param self Hook
+    ---@param event? string New event to bind
+    ---@return boolean
+    function mt:bind(event)
+        if self:whoami() ~= nil then return false end
+        event = event or self.bound
+
+        if not event then return false end
+        
+        hook.cast(event)
+        table.insert(hook.list[event], self)
+        self.bound = nil
+
+        return true
+    end
+
+    -- Execute hook
+    ---@param self Hook
+    ---@param ... any Arguments
+    ---@return any
+    function mt:call( ... )
+        if type(self.fn) ~= 'function' then return false end
+        return self.fn( ... )
     end
 end
 
----@param x number Position X
----@param y number Position Y
----@param w number Size W
----@param h number Size H
----@param r number Red Color
----@param g number Green Color
----@param b number Blue Color
----@param a number Alpha Color
----@param radius number Corner radius
----@return boolean
-function render.rectangle(x, y, w, h, r, g, b, a, radius)
-    radius = radius or 4
-    x, y, w, h, r, g, b, a, radius = math.round(x, y, w, h, r, g, b, a, radius)
+local render = { } do
 
-    local limit = math.min(w, h) / 2 -- limit radius to dont break render
-    radius = math.clamp(radius, 0, limit)
+    render.temp = {
+        blurReady = false, -- is blur ready
+    }
 
-    -- rectangles
-    renderer.rectangle(x + radius, y, w - 2 * radius, h, r, g, b, a)
-    renderer.rectangle(x, y + radius, radius, h - 2 * radius, r, g, b, a)
-    renderer.rectangle(x + w - radius, y + radius, radius, h - 2 * radius, r, g, b, a)
+    hook.new('paint_ui', function()
+        local map, lp = globals.mapname(), entity.get_local_player()
+        local team = entity.get_prop(lp, 'm_iTeamNum')
+        local isLoaded = true
 
-    -- corners
-    renderer.circle(x + radius, y + radius, r, g, b, a, radius, 180, 0.25)
-    renderer.circle(x + w - radius, y + radius, r, g, b, a, radius, 90, 0.25)
-    renderer.circle(x + radius, y + h - radius, r, g, b, a, radius, -90, 0.25)
-    renderer.circle(x + w - radius, y + h - radius, r, g, b, a, radius, 0, 0.25)
+        if not map then isLoaded = false end
+        if not lp then 
+            isLoaded = false 
+        elseif not team or team == 0 then
+            isLoaded = false
+        end
 
-    return true
+        render.temp.blurReady = isLoaded
+    end)
+
+    -- Render blur
+    ---@param x number X position
+    ---@param y number Y position
+    ---@param w number W size
+    ---@param h number H size
+    function render.blur(x, y, w, h) -- make blur available only in-game to prevent possible crash
+        x, y, w, h = math.round(x, y, w, h)
+
+        if not render.temp.blurReady then return false end
+        renderer.blur(x, y, w, h)
+    end
+
+    -- Render glow effect
+    ---@param x number X position
+    ---@param y number Y position
+    ---@param w number W size
+    ---@param h number H size
+    ---@param r number Red channel
+    ---@param g number Green channel
+    ---@param b number Blue channel
+    ---@param a number Alpha channel
+    ---@param radius number Radius
+    ---@param size number Size of glow
+    ---@param quality number Quality of glow
+    function render.glow(x, y, w, h, r, g, b, a, radius, size, quality)
+        quality = quality or 3
+        size = size or 5
+
+        x, y, w, h, r, g, b, a, radius, size, quality = math.round(x, y, w, h, r, g, b, a, radius, size, quality)
+
+        for i = size, 1, -1 do
+            local distance = (i - 1) / (size - 1)
+            render.rectangle_outline(x - i, y - i, w + i * 2, h + i * 2, r, g, b, a * math.exp(-distance * quality), radius + i, 1)
+        end
+    end
+
+    ---@param x number X position
+    ---@param y number Y position
+    ---@param w number W size
+    ---@param h number H size
+    ---@param r number Red channel
+    ---@param g number Green channel
+    ---@param b number Blue channel
+    ---@param a number Alpha channel
+    ---@param radius number Radius
+    function render.rectangle(x, y, w, h, r, g, b, a, radius)
+        radius = radius or 4
+        x, y, w, h, r, g, b, a, radius = math.round(x, y, w, h, r, g, b, a, radius)
+
+        local limit = math.min(w, h) / 2 -- limit radius to dont break render
+        radius = math.clamp(radius, 0, limit)
+
+        -- rectangles
+        renderer.rectangle(x + radius, y, w - 2 * radius, h, r, g, b, a)
+        renderer.rectangle(x, y + radius, radius, h - 2 * radius, r, g, b, a)
+        renderer.rectangle(x + w - radius, y + radius, radius, h - 2 * radius, r, g, b, a)
+
+        -- corners
+        renderer.circle(x + radius, y + radius, r, g, b, a, radius, 180, 0.25)
+        renderer.circle(x + w - radius, y + radius, r, g, b, a, radius, 90, 0.25)
+        renderer.circle(x + radius, y + h - radius, r, g, b, a, radius, -90, 0.25)
+        renderer.circle(x + w - radius, y + h - radius, r, g, b, a, radius, 0, 0.25)
+    end
+
+    ---@param x number X position
+    ---@param y number Y position
+    ---@param w number W size
+    ---@param h number H size
+    ---@param r number Red channel
+    ---@param g number Green channel
+    ---@param b number Blue channel
+    ---@param a number Alpha channel
+    ---@param radius number Radius
+    function render.rectangle_outline(x, y, w, h, r, g, b, a, radius, thickness)
+        x, y, w, h, r, g, b, a, radius, thickness = math.round(x, y, w, h, r, g, b, a, radius, thickness)
+
+        local limit = math.min(w, h) / 2 -- limit radius to dont break render
+        radius = math.clamp(radius, 0, limit)
+
+        -- rectangles / lines
+        renderer.rectangle(x + radius, y, w - 2 * radius, thickness, r, g, b, a)
+        renderer.rectangle(x + radius, y + h - thickness, w - 2 * radius, thickness, r, g, b, a)
+        renderer.rectangle(x, y + radius, thickness, h - 2 * radius, r, g, b, a)
+        renderer.rectangle(x + w - thickness, y + radius, thickness, h - 2 * radius, r, g, b, a)
+
+        -- corners
+        renderer.circle_outline(x + radius, y + radius, r, g, b, a, radius, 180, 0.25, thickness)
+        renderer.circle_outline(x + w - radius, y + radius, r, g, b, a, radius, 270, 0.25, thickness)
+        renderer.circle_outline(x + radius, y + h - radius, r, g, b, a, radius, 90, 0.25, thickness)
+        renderer.circle_outline(x + w - radius, y + h - radius, r, g, b, a, radius, 0, 0.25, thickness)
+
+        return true
+    end
+
+    ---@param x number X position
+    ---@param y number Y position
+    ---@param w number W size
+    ---@param h number H size
+    ---@param r number Red channel
+    ---@param g number Green channel
+    ---@param b number Blue channel
+    ---@param a number Alpha channel
+    ---@param radius number Radius
+    function render.selection(x, y, w, h, r, g, b, a, radius)
+        radius = radius or 4
+
+        x = math.round(x); y = math.round(y); w = math.round(w); h = math.round(h)
+        radius = math.min(radius, math.floor(w / 2), math.floor(h / 2))
+
+        renderer.circle_outline(x + radius, y + radius, r, g, b, a, radius, 180, 0.25, 1)
+        renderer.circle_outline(x + w - radius, y + radius, r, g, b, a, radius, 270, 0.25, 1)
+        renderer.circle_outline(x + radius, y + h - radius, r, g, b, a, radius, 90, 0.25, 1)
+        renderer.circle_outline(x + w - radius, y + h - radius, r, g, b, a, radius, 0, 0.25, 1)
+    end
 end
 
----@param x number Position X
----@param y number Position Y
----@param w number Size W
----@param h number Size H
----@param r number Red Color
----@param g number Green Color
----@param b number Blue Color
----@param a number Alpha Color
----@param radius number Corner radius
----@return boolean
-function render.rectangle_outline(x, y, w, h, r, g, b, a, radius, thickness)
-    x, y, w, h, r, g, b, a, radius, thickness = math.round(x, y, w, h, r, g, b, a, radius, thickness)
-
-    local limit = math.min(w, h) / 2 -- limit radius to dont break render
-    radius = math.clamp(radius, 0, limit)
-
-    -- rectangles / lines
-    renderer.rectangle(x + radius, y, w - 2 * radius, thickness, r, g, b, a)
-    renderer.rectangle(x + radius, y + h - thickness, w - 2 * radius, thickness, r, g, b, a)
-    renderer.rectangle(x, y + radius, thickness, h - 2 * radius, r, g, b, a)
-    renderer.rectangle(x + w - thickness, y + radius, thickness, h - 2 * radius, r, g, b, a)
-
-    -- corners
-    renderer.circle_outline(x + radius, y + radius, r, g, b, a, radius, 180, 0.25, thickness)
-    renderer.circle_outline(x + w - radius, y + radius, r, g, b, a, radius, 270, 0.25, thickness)
-    renderer.circle_outline(x + radius, y + h - radius, r, g, b, a, radius, 90, 0.25, thickness)
-    renderer.circle_outline(x + w - radius, y + h - radius, r, g, b, a, radius, 0, 0.25, thickness)
-
-    return true
-end
-
-function render.selection(x, y, w, h, r, g, b, a, radius)
-    radius = radius or 4
-
-    x = math.round(x); y = math.round(y); w = math.round(w); h = math.round(h)
-    radius = math.min(radius, math.floor(w / 2), math.floor(h / 2))
-
-    renderer.circle_outline(x + radius, y + radius, r, g, b, a, radius, 180, 0.25, 1)
-    renderer.circle_outline(x + w - radius, y + radius, r, g, b, a, radius, 270, 0.25, 1)
-    renderer.circle_outline(x + radius, y + h - radius, r, g, b, a, radius, 90, 0.25, 1)
-    renderer.circle_outline(x + w - radius, y + h - radius, r, g, b, a, radius, 0, 0.25, 1)
-end
-
-luna.register('render', render)
-
--- mouse
-local mouse = {} do 
+local mouse = { } do 
     mouse.held = function() return client.key_state(0x01) end
 
     mouse.inbounds = function(x, y, w, h)
@@ -502,11 +506,9 @@ local mouse = {} do
     end
 end
 
-luna.register('mouse', mouse)
-
 -- drag
-local drag = { temp = {} } do
-    local object = {}
+local drag = { temp = { } } do
+    local object = { }
     object.__index = object
 
     object.update = function(self, x, y, w, h)
@@ -566,7 +568,7 @@ local drag = { temp = {} } do
 
     object.dragStop = function(self)
         if not self.dragHook then return false end
-        self.dragHook:remove()
+        self.dragHook:unbind()
         self.dragHook = nil
         drag.publish(nil)
 
@@ -641,11 +643,11 @@ local drag = { temp = {} } do
     end
 
     drag.object = function(x, y, w, h)
-        return setmetatable({ x = x , y = y , w = w , h = h , draggable = true , id = '' , blocked = {} }, object)
+        return setmetatable({ x = x , y = y , w = w , h = h , draggable = true , id = '' , blocked = { } }, object)
     end
     
     drag.publish = function(what) drag.feed = what end
-    drag.snap = {}
+    drag.snap = { }
 
     drag.snapHook = hook.new('paint_ui', function()
         local dragging = type(drag.feed) == 'table'
@@ -681,11 +683,9 @@ hook.new('paint_ui', function()
     end
 end)
 
-luna.register('drag', drag)
-
 -- widget
-local widget = {} do
-    local object = {}
+local widget = { } do
+    local object = { }
     object.__index = object
     
     object.drawFn = holder
@@ -700,7 +700,7 @@ local widget = {} do
     object.init = function(self)
         self.drag = drag.object(self.x, self.y, self.w, self.h)
         self.drag:setDraggable(false)
-        self.temp = {}
+        self.temp = { }
 
         local _x, _y = client.screen_size()
         local x, y = ui.new_slider('LUA', 'B', self.id .. ':x', 0, _x, self.x), ui.new_slider('LUA', 'B', self.id .. ':y', 0, _y, self.y)
@@ -784,8 +784,12 @@ local widget = {} do
     end
 end
 
+luna.register('render', render)
 luna.register('widget', widget)
-
---#endregion
+luna.register('table', table)
+luna.register('color', color)
+luna.register('throw', throw)
+luna.register('math', math)
+luna.register('hook', hook)
 
 return luna
