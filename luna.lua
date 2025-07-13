@@ -260,8 +260,7 @@ math.pulse = function(min, max, speed, time)
     return (max + min) / 2 + math.sin(time * speed) * (max - min) / 2
 end
 --#endregion
-
-local luna = { mods = { } }
+luna.mods = { }
 
 luna.register = function(name, module)
     if luna.mods[name] then error('That module already registered') return false end
