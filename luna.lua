@@ -1,4 +1,3 @@
-local commit = 'I\'m here to dev purpose :3'
 --[[
 
         /ᐠ. ｡.ᐟ\ᵐᵉᵒʷˎˊ˗ 
@@ -9,44 +8,67 @@ local commit = 'I\'m here to dev purpose :3'
 
 local ffi = require 'ffi'
 
---#region color
-local color = {} do
-    -- metatable based
-    color.mt = {}
-    color.mt.__index = color.mt 
+local luna = { }
+luna.commit = commit or '?'
 
-    function color.mt:rgb()
+local color = { } do
+    ---@class Color
+    ---@
+    local mt = { }
+    mt.__index = mt
+    mt.__tostring = function(self)
+        return string.format('Color(%s, %s, %s, %s)', self:rgba())
+    end
+
+    -- Export RGB from Color
+    ---@param self Color
+    ---@return number, number, number
+    function mt:rgb()
         return self.r or 255, self.g or 255, self.b or 255
     end
 
-    function color.mt:rgba()
+    -- Export RGBA from Color
+    ---@param self Color
+    ---@return number, number, number, number
+    function mt:rgba()
         return self.r or 255, self.g or 255, self.b or 255, self.a or 255
     end
 
-    function color.mt:hex()
+    -- Export HEX from Color
+    ---@param self Color
+    ---@return string
+    function mt:hex()
         return color.toHex(self:rgb())
     end
 
-    function color.mt:hexa()
+    -- Export HEX with Alpha from Color
+    ---@param self Color
+    ---@return string
+    function mt:hexa()
         return color.toHex(self:rgba())
     end
 
+    -- Turn RGB\A to HEX\A
+    ---@param r number Red channel
+    ---@param g number Green channel
+    ---@param b number Blue channel
+    ---@param a? number Alpha channel
+    ---@return string
     color.toHex = function(r, g, b, a)
         local pattern = '\a%02X%02X%02X' .. (a and '%02X' or '')
         return string.format(pattern, r, g, b, a)
     end
 
-    color.alpha = function(str, a) -- turn HEX in string to HEXA
-        local hex = string.format('%02X', a or 255)
-
-        return string.gsub(str, '\a(%x%x%x%x%x%x)', function(col) return '\a' .. col .. hex end)
-    end
-
+    -- Create new color
+    ---@param r number Red channel
+    ---@param g number Green channel
+    ---@param b number Blue channel
+    ---@param a? number Alpha channel
+    ---@return Color
     color.new = function(r, g, b, a)
-        return setmetatable({ r = r , g = g , b = b , a = a }, color.mt)
+        return setmetatable({ r = r , g = g , b = b , a = a }, mt)
     end
-       
-    -- ffi based
+
     ffi.cdef[[
         typedef struct {
             uint8_t r, g, b, a;
@@ -57,7 +79,13 @@ local color = {} do
         hex = string.gsub(hex, '^#', '') -- remove #
         return tonumber(string.sub(hex, 1, 2), 16), tonumber(string.sub(hex, 3, 4), 16), tonumber(string.sub(hex, 5, 6), 16), tonumber(string.sub(hex, 7, 8), 16) or 255
     end
-        
+
+    -- Create new ffi struct
+    ---@param r number Red channel
+    ---@param g number Green channel
+    ---@param b number Blue channel
+    ---@param a number Alpha channel
+    ---@return table
     color.ffirgb = function(r, g, b, a)
         local mt = ffi.new('luna_color_struct_t')
 
@@ -69,9 +97,15 @@ local color = {} do
         return mt 
     end
 
+    -- Create new ffi struct
+    ---@param hex string HEX string
+    ---@return table
     color.ffihex = function(hex) return color.ffirgb(rgba_hex(hex)) end
 
-    function color.mt:toFfi()
+    -- Export FFi from Color
+    ---@param self Color
+    ---@return table
+    function mt:toFfi()
         return color.ffirgb(self:rgba())
     end
 end
@@ -79,13 +113,15 @@ end
 --#endregion
 
 --#region throw
-local throw = {} do
+local throw = { } do
     throw.reset = color.new():hex()
 
     throw.natives = {
         print = vtable_bind('vstdlib.dll', 'VEngineCvar007', 25, 'void(__cdecl*)(void*, const void*, const char*, ...)')
     }
 
+    -- Throw text in console
+    ---@param ... string|any Text to throw
     throw.out = function(...)
         local direct = throw.natives.print
         local args = {...}  
@@ -110,6 +146,10 @@ end
 local cTable = table
 local table = setmetatable({}, { __index = cTable })
 
+-- Find value in table
+---@param where table Where to find
+---@param what any What to find
+---@param fn? function Function to check
 table.find = function(where, what, fn)
     fn = fn or function(v, need) return v == need end
 
@@ -120,6 +160,10 @@ table.find = function(where, what, fn)
     return nil
 end
 
+-- Transform dictionary to array
+---@param what table Dictionary to transform
+---@param debug? number Style to transform, 1 = indexes, 2 = values
+---@return table
 table.toArray = function(what, debug)
     local array = {}
     debug = debug or 2
@@ -135,6 +179,9 @@ table.toArray = function(what, debug)
     return array
 end
 
+-- Unlink values
+---@param what table|any Value to unlink
+---@return any
 table.copy = function(what)
     if type(what) ~= 'table' then return what end
     local copy = {}
@@ -156,6 +203,9 @@ end
 local cMath = math
 local math = setmetatable({}, { __index = cMath })
 
+-- Round values
+---@param ... number Values to round
+---@return number
 math.round = function(...)
     local pack, data = {}, { ... }
     for _, v in ipairs(data) do
@@ -164,6 +214,9 @@ math.round = function(...)
     return unpack(pack)
 end
 
+-- Rainbow color
+---@param speed number Speed of rainbow
+---@return number, number, number
 math.rainbow = function(speed)
     speed = speed or 1
     
@@ -172,10 +225,21 @@ math.rainbow = function(speed)
     return math.floor(math.sin(time) * 127 + 128), math.floor(math.sin(time + 2 * math.pi / 3) * 127 + 128), math.floor(math.sin(time + 4 * math.pi / 3) * 127 + 128)
 end
 
+-- Clamp number
+---@param value number Value to clamp
+---@param min number Minimal value
+---@param max number Maximum value
+---@return number
 math.clamp = function(value, min, max)
     return math.max(min, math.min(value, max))
 end
 
+-- Lerp number
+---@param a number Start value
+---@param b number End value
+---@param t number Speed
+---@param force boolean Disable forcing
+---@return number
 math.lerp = function(a, b, t, force)
     if not a or not b or not t then return 0 end
 
@@ -184,13 +248,18 @@ math.lerp = function(a, b, t, force)
     return lerp
 end
 
+-- Pulsing value
+---@param min number Minimal value
+---@param max number Maximum value
+---@param speed number Speed
+---@param time number Custom time
+---@return number
 math.pulse = function(min, max, speed, time)
     time = time or globals.realtime()
 
     return (max + min) / 2 + math.sin(time * speed) * (max - min) / 2
 end
 --#endregion
-
 
 local luna = { mods = { } }
 
@@ -718,7 +787,5 @@ end
 luna.register('widget', widget)
 
 --#endregion
-
-luna.commit = commit or '?'
 
 return luna
