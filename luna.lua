@@ -260,6 +260,7 @@ math.pulse = function(min, max, speed, time)
     return (max + min) / 2 + math.sin(time * speed) * (max - min) / 2
 end
 --#endregion
+
 luna.mods = { }
 
 luna.register = function(name, module)
