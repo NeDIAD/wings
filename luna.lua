@@ -1,3 +1,4 @@
+local commit = '4a8d92c5106140ffc8ff6d5b12e2a8a05091c9d6'
 --[[
 
         /ᐠ. ｡.ᐟ\ᵐᵉᵒʷˎˊ˗ 
@@ -264,7 +265,8 @@ local hook = { } do
         if not hook.list[event] then return false end
 
         for k, mt in ipairs(hook.list[event]) do
-            pcall(mt.call, mt, ...)
+            local status, err = pcall(mt.call, mt, ...)
+            if not status then print(err) end
         end
     end
 
