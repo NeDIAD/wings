@@ -1,4 +1,4 @@
-local commit = '4a8d92c5106140ffc8ff6d5b12e2a8a05091c9d6'
+local commit = '3b02666e7c2b4c0fde923a72e6efd8ce5fd7307d'
 --[[
 
         /ᐠ. ｡.ᐟ\ᵐᵉᵒʷˎˊ˗ 
@@ -10,19 +10,12 @@ local commit = '4a8d92c5106140ffc8ff6d5b12e2a8a05091c9d6'
 local ffi = require 'ffi'
 
 local luna = {
-    mods = { },
+    api = setmetatable( { }, { __index = _G } ),
     commit = commit or '?',
 }
 
-luna.register = function(name, module)
-    if luna.mods[name] then error('That module already registered') return false end
-    luna.mods[name] = module
-    
-    return true
-end
-
 luna.export = function(name)
-    return luna.mods[name] or false
+    return luna.api[name] or false -- for scripts that use old version
 end
 
 local table = setmetatable( { } , { __index = _G.table } )
@@ -58,6 +51,7 @@ table.find = function(origin, value, method)
     end
 end
 
+luna.api.table = table
 local math = setmetatable( { } , { __index = _G.math } )
 
 -- Round values
@@ -116,6 +110,8 @@ math.pulse = function(min, max, speed, time)
 
     return (max + min) / 2 + math.sin(time * speed) * (max - min) / 2
 end
+
+luna.api.math = math
 
 local color = { } do
     ---@class Color
@@ -215,6 +211,8 @@ local color = { } do
     end
 end
 
+luna.api.color = color
+
 local throw = { } do
     throw.reset = color.new():hex()
 
@@ -242,6 +240,8 @@ local throw = { } do
         return true
     end
 end
+
+luna.api.throw = throw
 
 local hook = { } do
     hook.unique = { }
@@ -357,9 +357,26 @@ local hook = { } do
     ---@return any
     function mt:call( ... )
         if type(self.fn) ~= 'function' then return false end
+        if type(self.pass_condition) == 'function' then
+            local try = self:pass_condition()
+
+            if not try then return false end
+        end
+
         return self.fn( ... )
     end
+
+    -- Add condition to hook call
+    ---@param fn function Condition
+    ---@return boolean
+    function mt:condition(fn)
+        self.pass_condition = fn
+        
+        return true
+    end
 end
+
+luna.api.hook = hook
 
 local render = { } do
 
@@ -498,6 +515,8 @@ local render = { } do
     end
 end
 
+luna.api.render = render
+
 local mouse = { } do 
     mouse.held = function() return client.key_state(0x01) end
 
@@ -507,6 +526,8 @@ local mouse = { } do
         return mX >= x and mY >= y and mX <= (x + w) and mY <= (y + h)
     end
 end
+
+luna.api.mouse = mouse
 
 -- drag
 local drag = { temp = { } } do
@@ -666,6 +687,8 @@ local drag = { temp = { } } do
     end, 1)
 end
 
+luna.api.drag = drag
+
 hook.new('setup_command', function(list)
     if drag.feed then
         list.in_attack = false
@@ -786,12 +809,87 @@ local widget = { } do
     end
 end
 
-luna.register('render', render)
-luna.register('widget', widget)
-luna.register('table', table)
-luna.register('color', color)
-luna.register('throw', throw)
-luna.register('math', math)
-luna.register('hook', hook)
+luna.api.widget = widget
+
+local exploit = { } do
+    -- Is DT / OSAA charged?
+    ---@return boolean
+    function exploit.is_ready()
+        local lp = entity.get_local_player()
+        if not lp then return false end
+
+        return globals.tickcount() > entity.get_prop(lp, 'm_nTickBase')
+    end
+
+    -- For defensive
+    exploit.tickbase = { command = 0, previous = 0, delta = 0 }
+
+    exploit.tickbase.run_command = hook.new('run_command', function(cmd)
+        exploit.tickbase.command = cmd.command_number
+    end)
+
+    exploit.tickbase.predict_command = hook.new('predict_command', function(cmd)
+        if cmd.command_number == exploit.tickbase.command then
+            local tickbase = entity.get_prop(entity.get_local_player(), 'm_nTickBase')
+
+            exploit.tickbase.delta = math.clamp(math.abs(tickbase - exploit.tickbase.previous) - 1, 0, 14) -- -1 to get only ticks modified by exploit
+            exploit.tickbase.previous = math.max(tickbase, exploit.tickbase.previous or 0)
+            exploit.tickbase.command = 0
+        end
+    end)
+
+	exploit.tickbase.level_init = hook.new('level_init', function()
+		exploit.tickbase.previous = 0
+        exploit.tickbase.delta = 0
+	end)
+
+    -- Get tickbase delta.
+    ---@return number
+    function exploit.get_delta()
+        return exploit.tickbase.delta
+    end
+
+    -- Does player in defensive right now?
+    ---@param cmd table Command CTX
+    ---@return boolean
+    function exploit.in_defensive(cmd)
+        if not exploit.is_ready() then return false end
+
+        return (cmd and cmd.force_defensive) or exploit.get_delta() > 8
+    end
+
+    -- Can defensive be forced?
+    ---@param tick number Forced tick
+    ---@return boolean
+    function exploit.can_be_forced(tick)
+        local lp = entity.get_local_player()
+        if not lp then return false end
+        
+        return exploit.tickbase.previous % 14 <= tick
+    end
+end
+
+luna.api.exploit = exploit
+
+local utils = { } do
+    utils.native = { } do
+        -- Interface's
+        utils.native.vgui3 = client.create_interface('vguimatsurface.dll', 'VGUI_Surface031')
+
+        -- Native's
+        utils.native.playsound = ffi.cast('void(__thiscall*)(void*, const char*)', (ffi.cast('void***', utils.native.vgui3)[0])[82])
+    end
+        
+    -- Play sound by path
+    ---@param path string Path to file in "csgo/sound"
+    ---@return nil
+    function utils.playsound(path)
+        local sound = ffi.cast('const char*', path)
+
+        utils.native.playsound(utils.native.vgui3, sound)
+    end
+end
+
+luna.api.utils = utils
 
 return luna
