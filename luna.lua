@@ -1,4 +1,4 @@
-local commit = '3b02666e7c2b4c0fde923a72e6efd8ce5fd7307d'
+local commit = 'f18c872e10da9c764ebd191051801b7c3b3bc4e9'
 --[[
 
         /ᐠ. ｡.ᐟ\ᵐᵉᵒʷˎˊ˗ 
@@ -49,6 +49,21 @@ table.find = function(origin, value, method)
         local found = method(v)
         if found then return k end
     end
+end
+
+-- Make array from dictionary
+---@param origin table Table to recurse
+---@param method string How to convert table
+---@return table
+table.flat = function(origin, method)
+    local array = { }
+
+    for key, value in pairs(origin) do
+        local data = { key = key, value = value }
+        table.insert(array, data[method]) 
+    end
+
+    return array
 end
 
 luna.api.table = table
@@ -863,9 +878,9 @@ local exploit = { } do
     ---@return boolean
     function exploit.can_be_forced(tick)
         local lp = entity.get_local_player()
-        if not lp then return false end
+        if not lp or not exploit.is_ready() then return false end
         
-        return exploit.tickbase.previous % 14 <= tick
+        return globals.tickcount() % 14 < tick
     end
 end
 
@@ -887,6 +902,23 @@ local utils = { } do
         local sound = ffi.cast('const char*', path)
 
         utils.native.playsound(utils.native.vgui3, sound)
+    end
+
+    -- Normalize value by limit
+    ---@param value number Value to normalize
+    ---@param limit number Limitation
+    ---@return number
+    function utils.normalize(value, limit)
+        return ((value + limit) % (limit * 2)) - limit
+    end
+
+    -- Spin between two values
+    ---@param v1 number Min / Start
+    ---@param v2 number Max / End
+    ---@return number
+    function utils.spin(v1, v2)
+        local t = 0.5 * (1 - math.cos(globals.realtime() * math.pi))
+        return v1 + (v2 - v1) * t
     end
 end
 
