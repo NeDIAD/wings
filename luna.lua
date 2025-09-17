@@ -1,4 +1,4 @@
-local commit = 'f18c872e10da9c764ebd191051801b7c3b3bc4e9'
+local commit = 'bbaba127fe472a957c23be9e6d31d31ed5e6caea'
 --[[
 
         /ᐠ. ｡.ᐟ\ᵐᵉᵒʷˎˊ˗ 
@@ -836,41 +836,115 @@ local exploit = { } do
         return globals.tickcount() > entity.get_prop(lp, 'm_nTickBase')
     end
 
-    -- For defensive
-    exploit.tickbase = { command = 0, previous = 0, delta = 0 }
+    -- For defensive (credits: Hack3r_jopi, https://yougame.biz/threads/345134/#post-3351369)
+    exploit.defensive = {
+        aimbot = ui.reference("RAGE", "Aimbot", "Enabled"), doubletap = {ui.reference("RAGE", "Aimbot", 'Double tap')}, hideshots = {ui.reference("AA", 'Other', 'On shot anti-aim')}, fakeduck = ui.reference("RAGE", "Other", "Duck peek assist"),
 
-    exploit.tickbase.run_command = hook.new('run_command', function(cmd)
-        exploit.tickbase.command = cmd.command_number
-    end)
+        max_process_ticks = math.abs(client.get_cvar('sv_maxusrcmdprocessticks')) - 1,
+        tickbase_difference = 0, ticks_processed = 0, command_number = 0, choked_commands = 0, need_force_defensive = false, current_shift_amount = 0,
+    
+        reset_vars = function(self) self.ticks_processed = 0 self.tickbase_difference = 0 self.choked_commands = 0 self.command_number = 0 end,
+        store_vars = function(self, ctx) self.command_number = ctx.command_number self.choked_commands = ctx.chokedcommands end,
+        store_tickbase_difference = function(self, ctx)
+            local lp = entity.get_local_player()
+            local tb = entity.get_prop(lp, 'm_nTickBase')
 
-    exploit.tickbase.predict_command = hook.new('predict_command', function(cmd)
-        if cmd.command_number == exploit.tickbase.command then
-            local tickbase = entity.get_prop(entity.get_local_player(), 'm_nTickBase')
+            if ctx.command_number == self.command_number then
+                self.ticks_processed = math.clamp(math.abs(tb - self.tickbase_difference), 0, self.max_process_ticks - self.choked_commands)
+                self.tickbase_difference = math.max(tb, self.tickbase_difference or 0)
+                self.command_number = 0
+            end
+        end,
 
-            exploit.tickbase.delta = math.clamp(math.abs(tickbase - exploit.tickbase.previous) - 1, 0, 14) -- -1 to get only ticks modified by exploit
-            exploit.tickbase.previous = math.max(tickbase, exploit.tickbase.previous or 0)
-            exploit.tickbase.command = 0
+        is_doubletap = function(self) return ui.get(self.doubletap[2]) end,
+        is_hideshots = function(self) return ui.get(self.hideshots[2]) end,
+
+        is_active = function(self) return self:is_doubletap() or self:is_hideshots() end,
+        in_defensive = function(self, override) return self:is_active() and (self.ticks_processed > 1 and self.ticks_processed < (override or self.max_process_ticks)) end,
+        is_defensive_ended = function(self) return not self:in_defensive() or (self.ticks_processed >= 0 and self.ticks_processed <= 5) and self.tickbase_difference > 0 end,
+        is_lagcomp_broken = function(self) return not self:is_defensive_ended() or self.tickbase_difference < entity.get_prop(entity.get_local_player(), 'm_nTickBase') end,
+    
+        can_recharge = function(self)
+            if not self:is_active() then return false end
+            local lp = entity.get_local_player()
+
+            local curtime = globals.tickinterval() * (entity.get_prop(lp, 'm_nTickBase') - 16)
+            if curtime < entity.get_prop(lp, 'm_flNextAttack') then return false end
+            if curtime < entity.get_prop(entity.get_player_weapon(lp), 'm_flNextPrimaryAttack') then return false end
+            return true
+        end,
+
+        in_recharge = function(self)
+            if not (self:is_active() and self:can_recharge()) or self:in_defensive() then return false end
+            local latency_shift = math.ceil(toticks(client.latency()) * 1.25)
+            local current_shift_amount = ((self.tickbase_difference - globals.tickcount()) * -1) + latency_shift
+            local max_shift_amount, min_shift_amount = (self.max_process_ticks - 1) - latency_shift, -(self.max_process_ticks - 1) + latency_shift
+            if latency_shift ~= 0 then
+                return current_shift_amount > min_shift_amount and current_shift_amount < max_shift_amount
+            else
+                return current_shift_amount > (min_shift_amount / 2) and current_shift_amount < (max_shift_amount / 2)
+            end
+        end,
+        
+        should_force_defensive = function(self, state)
+            if not self:is_active() then return false end
+            self.need_force_defensive = state and self:is_defensive_ended()
+        end,
+
+        allow_unsafe_charge = function(self, state)
+            if not (self:is_active() and self:can_recharge()) then ui.set(self.aimbot, true) return end
+            if not state then ui.set(self.aimbot, true) return end
+            if ui.get(self.fakeduck) then ui.set(self.aimbot, true) return end
+            ui.set(self.aimbot, not self:in_recharge())
+        end,
+
+        force_reload_exploits = function(self, state)
+            if not state then
+                ui.set(self.doubletap[1], true) ui.set(self.hideshots[1], true)
+                return
+            end
+            if self:is_doubletap() and not self:in_recharge() then
+                ui.set(self.doubletap[1], false)
+            else
+                ui.set(self.doubletap[1], true)
+            end
+            if self:is_hideshots() and not self:in_recharge() then
+                ui.set(self.hideshots[1], false)
+            else
+                ui.set(self.hideshots[1], true)
+            end
         end
-    end)
+    } do
+        hook.new('setup_command', function(ctx)
+            if not (entity.get_local_player() and entity.is_alive(entity.get_local_player()) and entity.get_player_weapon(entity.get_local_player())) then return end
 
-	exploit.tickbase.level_init = hook.new('level_init', function()
-		exploit.tickbase.previous = 0
-        exploit.tickbase.delta = 0
-	end)
+            if exploit.defensive.need_force_defensive then ctx.force_defensive = true end
+        end)
 
-    -- Get tickbase delta.
-    ---@return number
-    function exploit.get_delta()
-        return exploit.tickbase.delta
-    end
+        hook.new('run_command', function(ctx)
+            exploit.defensive:store_vars(ctx)
+        end)
 
-    -- Does player in defensive right now?
-    ---@param cmd table Command CTX
-    ---@return boolean
-    function exploit.in_defensive(cmd)
-        if not exploit.is_ready() then return false end
+        hook.new('predict_command', function(ctx)
+            exploit.defensive:store_tickbase_difference(ctx)
+        end)
 
-        return (cmd and cmd.force_defensive) or exploit.get_delta() > 8
+        hook.new('on_player_death', function(ctx)
+            if not (ctx.userid and ctx.attacker) then return end
+            if entity.get_local_player() ~= client.userid_to_entindex(ctx.userid) then return end
+            exploit.defensive:reset_vars()
+        end)
+
+        local reset = function()
+            exploit.defensive:reset_vars()
+        end
+
+        hook.new('level_init', reset)
+        hook.new('round_start', reset)
+        hook.new('round_end', reset)
+        hook.new('shutdown', function()
+            collectgarbage('collect')
+        end)
     end
 
     -- Can defensive be forced?
