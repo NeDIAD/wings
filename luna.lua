@@ -1,4 +1,4 @@
-local commit = 'bbaba127fe472a957c23be9e6d31d31ed5e6caea'
+local commit = '08386b8baeb0c928fb142e1f5b99a0257825ab97'
 --[[
 
         /ᐠ. ｡.ᐟ\ᵐᵉᵒʷˎˊ˗ 
@@ -8,6 +8,7 @@ local commit = 'bbaba127fe472a957c23be9e6d31d31ed5e6caea'
 ]]
 
 local ffi = require 'ffi'
+local vector = require 'vector'
 
 local luna = {
     api = setmetatable( { }, { __index = _G } ),
@@ -993,6 +994,44 @@ local utils = { } do
     function utils.spin(v1, v2)
         local t = 0.5 * (1 - math.cos(globals.realtime() * math.pi))
         return v1 + (v2 - v1) * t
+    end
+
+    -- Is peeking
+    ---@param mindmg? number Minimum damage
+    ---@return boolean
+    function utils.is_peeking(mindmg)
+        mindmg = mindmg or 1
+
+        local lp = entity.get_local_player()
+        if not lp then return end
+        local enemies = entity.get_players(true)
+        if not enemies then
+            return false
+        end
+
+        local predict_amt = 0.25
+        local eye_position = vector(client.eye_position())
+        local velocity_prop_local = vector(entity.get_prop(lp, 'm_vecVelocity'))
+        local predicted_eye_position = vector(eye_position.x + velocity_prop_local.x * predict_amt, eye_position.y + velocity_prop_local.y * predict_amt, eye_position.z + velocity_prop_local.z * predict_amt)
+        
+        for i = 1, #enemies do
+            local player = enemies[i]
+            local velocity_prop = vector(entity.get_prop(player, 'm_vecVelocity'))
+            local origin = vector(entity.get_prop(player, 'm_vecOrigin'))
+            local predicted_origin = vector(origin.x + velocity_prop.x * predict_amt, origin.y + velocity_prop.y * predict_amt, origin.z + velocity_prop.z * predict_amt)
+            
+            entity.get_prop(player, 'm_vecOrigin', predicted_origin)
+            
+            local head_origin = vector(entity.hitbox_position(player, 0))
+            local predicted_head_origin = vector(head_origin.x + velocity_prop.x * predict_amt, head_origin.y + velocity_prop.y * predict_amt, head_origin.z + velocity_prop.z * predict_amt)
+            
+            local trace_entity, damage = client.trace_bullet(lp, predicted_eye_position.x, predicted_eye_position.y, predicted_eye_position.z, predicted_head_origin.x, predicted_head_origin.y, predicted_head_origin.z)
+            entity.get_prop(player, 'm_vecOrigin', origin)
+            
+            if damage >= mindmg then return true end
+        end
+        
+        return false
     end
 end
 
