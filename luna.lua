@@ -1,4 +1,4 @@
-local commit = '08386b8baeb0c928fb142e1f5b99a0257825ab97'
+local commit = '0da1a7887e5ba120a6a01f21fb44fd36737ea33a'
 --[[
 
         /ᐠ. ｡.ᐟ\ᵐᵉᵒʷˎˊ˗ 
@@ -996,43 +996,66 @@ local utils = { } do
         return v1 + (v2 - v1) * t
     end
 
-    -- Is peeking
-    ---@param mindmg? number Minimum damage
-    ---@return boolean
-    function utils.is_peeking(mindmg)
-        mindmg = mindmg or 1
+    -- Find aim angle by two vectors
+    ---@param vec_from number From
+    ---@param vec_to number To
+    ---@return number, number
+    function utils.aim_angle(vec_from, vec_to)
+        local delta_x = vec_to.x - vec_from.x
+        local delta_y = vec_to.y - vec_from.y
+        local delta_z = vec_to.z - vec_from.z
 
-        local lp = entity.get_local_player()
-        if not lp then return end
-        local enemies = entity.get_players(true)
-        if not enemies then
-            return false
-        end
+        local hyp = math.sqrt(delta_x * delta_x + delta_y * delta_y)
 
-        local predict_amt = 0.25
-        local eye_position = vector(client.eye_position())
-        local velocity_prop_local = vector(entity.get_prop(lp, 'm_vecVelocity'))
-        local predicted_eye_position = vector(eye_position.x + velocity_prop_local.x * predict_amt, eye_position.y + velocity_prop_local.y * predict_amt, eye_position.z + velocity_prop_local.z * predict_amt)
-        
-        for i = 1, #enemies do
-            local player = enemies[i]
-            local velocity_prop = vector(entity.get_prop(player, 'm_vecVelocity'))
-            local origin = vector(entity.get_prop(player, 'm_vecOrigin'))
-            local predicted_origin = vector(origin.x + velocity_prop.x * predict_amt, origin.y + velocity_prop.y * predict_amt, origin.z + velocity_prop.z * predict_amt)
-            
-            entity.get_prop(player, 'm_vecOrigin', predicted_origin)
-            
-            local head_origin = vector(entity.hitbox_position(player, 0))
-            local predicted_head_origin = vector(head_origin.x + velocity_prop.x * predict_amt, head_origin.y + velocity_prop.y * predict_amt, head_origin.z + velocity_prop.z * predict_amt)
-            
-            local trace_entity, damage = client.trace_bullet(lp, predicted_eye_position.x, predicted_eye_position.y, predicted_eye_position.z, predicted_head_origin.x, predicted_head_origin.y, predicted_head_origin.z)
-            entity.get_prop(player, 'm_vecOrigin', origin)
-            
-            if damage >= mindmg then return true end
-        end
-        
-        return false
+        local pitch = math.deg(-math.atan2(delta_z, hyp))
+        local yaw = math.deg(math.atan2(delta_y, delta_x))
+
+        return pitch, yaw
     end
+
+    -- i wrote this function only i can
+    -- Returns value from array based on key and ticks with interval 20 - 40
+    ---@param animation table Possible values
+    ---@param key string Key to generate unique intervals
+    ---@return string | any
+    function utils.sync_animation(animation, key)
+        if not animation or #animation == 0 then
+            return '?'
+        end
+        local function hash(str)
+            local h = 0
+            for i = 1, #str do
+                h = (h * 31 + str:byte(i)) % 2^32
+            end
+            return h
+        end
+        local tick = globals.tickcount()
+        local seed = hash(key)
+
+        -- generating unique intervals
+        local intervals = {}
+        local total_time = 0
+        for i = 1, #animation do
+            local interval = 20 + ((seed + i * 17) % 21)
+            table.insert(intervals, interval)
+            total_time = total_time + interval
+        end
+
+        tick = (tick + seed % 1000) % total_time -- offset
+
+        local accumulated = 0
+        for i = 1, #intervals do
+            accumulated = accumulated + intervals[i]
+            if tick < accumulated then
+                return animation[i]
+            end
+        end
+
+        return animation[1]
+    end
+
+    -- its here only to support old versions
+    function utils.is_peeking() return false end
 end
 
 luna.api.utils = utils
