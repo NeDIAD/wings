@@ -1,4 +1,4 @@
-local commit = '0da1a7887e5ba120a6a01f21fb44fd36737ea33a'
+local commit = 'b1e50869f34a774551ebd35124c25ec5cb6be636'
 --[[
 
         /ᐠ. ｡.ᐟ\ᵐᵉᵒʷˎˊ˗ 
@@ -23,7 +23,7 @@ local table = setmetatable( { } , { __index = _G.table } )
 
 -- Unlink values
 ---@param value table|any Value to unlink
----@param deep number Deep of unlink
+---@param deep? number Deep of unlink
 ---@return any
 table.unlink = function(value, deep)
     deep = deep or math.huge
@@ -36,6 +36,22 @@ table.unlink = function(value, deep)
     end
 
     return unlink
+end
+
+-- Merge two tables
+---@param origin table Origin
+---@param ... table Tables to merge
+---@return table
+table.merge = function(origin, ...)
+    local merged = table.unlink(origin)
+
+    for i, tbl in ipairs({ ... }) do
+        for key, value in pairs(tbl) do
+            merged[key] = value
+        end
+    end
+
+    return merged
 end
 
 -- Find value in table
