@@ -1,4 +1,4 @@
-local commit = 'b1e50869f34a774551ebd35124c25ec5cb6be636'
+local commit = 'e20961e95a15144bc42d6fa56131a2a8a3017bf6'
 --[[
 
         /ᐠ. ｡.ᐟ\ᵐᵉᵒʷˎˊ˗ 
@@ -456,6 +456,8 @@ local render = { } do
     ---@param size number Size of glow
     ---@param quality number Quality of glow
     function render.glow(x, y, w, h, r, g, b, a, radius, size, quality)
+        if a == 0 then return false end
+
         quality = quality or 3
         size = size or 5
 
@@ -477,6 +479,8 @@ local render = { } do
     ---@param a number Alpha channel
     ---@param radius number Radius
     function render.rectangle(x, y, w, h, r, g, b, a, radius)
+        if a == 0 then return false end
+
         radius = radius or 4
         x, y, w, h, r, g, b, a, radius = math.round(x, y, w, h, r, g, b, a, radius)
 
@@ -505,6 +509,8 @@ local render = { } do
     ---@param a number Alpha channel
     ---@param radius number Radius
     function render.rectangle_outline(x, y, w, h, r, g, b, a, radius, thickness)
+        if a == 0 then return false end
+
         x, y, w, h, r, g, b, a, radius, thickness = math.round(x, y, w, h, r, g, b, a, radius, thickness)
 
         local limit = math.min(w, h) / 2 -- limit radius to dont break render
@@ -535,6 +541,8 @@ local render = { } do
     ---@param a number Alpha channel
     ---@param radius number Radius
     function render.selection(x, y, w, h, r, g, b, a, radius)
+        if a == 0 then return false end
+
         radius = radius or 4
 
         x = math.round(x); y = math.round(y); w = math.round(w); h = math.round(h)
@@ -611,7 +619,17 @@ local drag = { temp = { } } do
             {
                 { sW / 2 , 0 },
                 { sW / 2, sH },
-            }
+            },
+
+            {
+                { 0 , 5 + self.h / 2 },
+                { sW, 5 + self.h / 2 }
+            },
+
+            {
+                { 0 , sH - 5 - self.h / 2 },
+                { sW, sH - 5 - self.h / 2 }
+            },
         }
 
         self.dragHook = hook.new('paint_ui', function()
@@ -679,7 +697,9 @@ local drag = { temp = { } } do
         local targetX = mX - self.dragOffsetX
         local targetY = mY - self.dragOffsetY
 
-        targetX, targetY = self:snapToLines(targetX, targetY)
+        if not client.key_state(0x10) then
+            targetX, targetY = self:snapToLines(targetX, targetY)
+        end
 
         if not self.blocked.x then self.x = math.lerp(self.x, targetX, .15) end
         if not self.blocked.y then self.y = math.lerp(self.y, targetY, .15) end
@@ -705,8 +725,9 @@ local drag = { temp = { } } do
     drag.snap = { }
 
     drag.snapHook = hook.new('paint_ui', function()
+        local sW, sH = client.screen_size()
         local dragging = type(drag.feed) == 'table'
-        drag.temp.alpha = math.lerp(drag.temp.alpha, dragging and 1 or 0, .05)
+        drag.temp.alpha = math.lerp(drag.temp.alpha, dragging and (client.key_state(0x10) and 0.3 or 1) or 0, .05)
 
         for _, snap in ipairs(drag.snap) do
             renderer.line(
@@ -716,6 +737,8 @@ local drag = { temp = { } } do
                 255, 255, 255, 150 * drag.temp.alpha
             )
         end
+
+        renderer.text(sW / 2, 100, 255, 255, 255, 255 * drag.temp.alpha, 'cb+', 0, 'SHIFT - Disable snap to lines')
     end, 1)
 end
 
