@@ -908,6 +908,8 @@ local exploit = { } do
             if not self:is_active() then return false end
             local lp = entity.get_local_player()
 
+            if not lp or not entity.is_alive(lp) then return false end
+
             local curtime = globals.tickinterval() * (entity.get_prop(lp, 'm_nTickBase') - 16)
             if curtime < entity.get_prop(lp, 'm_flNextAttack') then return false end
             if curtime < entity.get_prop(entity.get_player_weapon(lp), 'm_flNextPrimaryAttack') then return false end
