@@ -1,4 +1,4 @@
-local commit = 'e20961e95a15144bc42d6fa56131a2a8a3017bf6'
+local commit = 'a99cf5e2879a86fb71e06554ceef107c76fb030d'
 --[[
 
         /ᐠ. ｡.ᐟ\ᵐᵉᵒʷˎˊ˗ 
@@ -932,7 +932,7 @@ local exploit = { } do
         end,
 
         allow_unsafe_charge = function(self, state)
-            if not (self:is_active() and self:can_recharge()) then ui.set(self.aimbot, true) return end
+            if not entity.get_local_player() or not (self:is_active() and self:can_recharge()) then ui.set(self.aimbot, true) return end
             if not state then ui.set(self.aimbot, true) return end
             if ui.get(self.fakeduck) then ui.set(self.aimbot, true) return end
             ui.set(self.aimbot, not self:in_recharge())
