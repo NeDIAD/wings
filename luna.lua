@@ -1,4 +1,4 @@
-local commit = 'a99cf5e2879a86fb71e06554ceef107c76fb030d'
+local commit = 'a4eb64b42dd2e900fdec02dd402e2b69ba1b7daf'
 --[[
 
         /ᐠ. ｡.ᐟ\ᵐᵉᵒʷˎˊ˗ 
@@ -974,7 +974,7 @@ local exploit = { } do
             exploit.defensive:store_tickbase_difference(ctx)
         end)
 
-        hook.new('on_player_death', function(ctx)
+        hook.new('player_death', function(ctx)
             if not (ctx.userid and ctx.attacker) then return end
             if entity.get_local_player() ~= client.userid_to_entindex(ctx.userid) then return end
             exploit.defensive:reset_vars()
