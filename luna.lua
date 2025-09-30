@@ -910,11 +910,12 @@ local exploit = { } do
 
             if not lp or not entity.is_alive(lp) then return false end
             local tb = entity.get_prop(lp, 'm_nTickBase')
-            if not tb then return false end
+            local weap = entity.get_player_weapon(lp)
+            if not tb or not weap then return false end
 
             local curtime = globals.tickinterval() * (tb - 16)
             if curtime < entity.get_prop(lp, 'm_flNextAttack') then return false end
-            if curtime < entity.get_prop(entity.get_player_weapon(lp), 'm_flNextPrimaryAttack') then return false end
+            if curtime < entity.get_prop(weap, 'm_flNextPrimaryAttack') then return false end
             return true
         end,
 
